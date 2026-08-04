@@ -1,11 +1,14 @@
 """Tests for static bearer-token authentication used by remote HTTP deployments."""
 
 import pytest
+from fastmcp.server.auth import MultiAuth
 
 from garmin_connect_mcp.auth import GarminConfig, has_inline_tokens, validate_credentials
 from garmin_connect_mcp.http_auth import StaticTokenVerifier, build_auth_provider
+from garmin_connect_mcp.oauth_bridge import SingleClientOAuthBridge
 
 VALID_TOKEN = "a" * 64
+VALID_OAUTH_SECRET = "b" * 32
 
 
 class TestStaticTokenVerifier:
@@ -50,8 +53,65 @@ class TestBuildAuthProvider:
 
     def test_builds_verifier_when_set(self, monkeypatch):
         monkeypatch.setenv("MCP_AUTH_TOKEN", VALID_TOKEN)
+        monkeypatch.delenv("OAUTH_CLIENT_SECRET", raising=False)
 
         assert isinstance(build_auth_provider(), StaticTokenVerifier)
+
+
+class TestBuildAuthProviderWithOAuthBridge:
+    """MCP_AUTH_TOKEN + OAUTH_CLIENT_SECRET together enable Claude's OAuth 'Connect'
+    flow, on top of (not instead of) the plain bearer-token path."""
+
+    def test_plain_verifier_when_oauth_secret_not_set(self, monkeypatch):
+        monkeypatch.setenv("MCP_AUTH_TOKEN", VALID_TOKEN)
+        monkeypatch.delenv("OAUTH_CLIENT_SECRET", raising=False)
+
+        assert isinstance(build_auth_provider(), StaticTokenVerifier)
+
+    def test_falls_back_to_plain_verifier_without_a_public_base_url(self, monkeypatch, capsys):
+        monkeypatch.setenv("MCP_AUTH_TOKEN", VALID_TOKEN)
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET", VALID_OAUTH_SECRET)
+        monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
+        monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+
+        provider = build_auth_provider()
+
+        assert isinstance(provider, StaticTokenVerifier)
+        assert "no public base URL was found" in capsys.readouterr().err
+
+    def test_builds_multi_auth_with_oauth_bridge_when_fully_configured(self, monkeypatch):
+        monkeypatch.setenv("MCP_AUTH_TOKEN", VALID_TOKEN)
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET", VALID_OAUTH_SECRET)
+        monkeypatch.setenv("MCP_PUBLIC_URL", "https://garmin-connect-mcp.example.onrender.com")
+
+        provider = build_auth_provider()
+
+        assert isinstance(provider, MultiAuth)
+        assert isinstance(provider.server, SingleClientOAuthBridge)
+        assert len(provider.verifiers) == 1
+        assert isinstance(provider.verifiers[0], StaticTokenVerifier)
+
+    def test_render_external_url_is_used_when_mcp_public_url_is_unset(self, monkeypatch):
+        monkeypatch.setenv("MCP_AUTH_TOKEN", VALID_TOKEN)
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET", VALID_OAUTH_SECRET)
+        monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
+        monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://garmin-connect-mcp.onrender.com")
+
+        assert isinstance(build_auth_provider(), MultiAuth)
+
+    async def test_oauth_bridged_token_still_verifies_via_the_static_fallback(self, monkeypatch):
+        """Direct/manual bearer clients must keep working exactly as before,
+        regardless of whether the OAuth bridge is also configured."""
+        monkeypatch.setenv("MCP_AUTH_TOKEN", VALID_TOKEN)
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET", VALID_OAUTH_SECRET)
+        monkeypatch.setenv("MCP_PUBLIC_URL", "https://garmin-connect-mcp.example.onrender.com")
+
+        provider = build_auth_provider()
+        assert provider is not None
+
+        access = await provider.verify_token(VALID_TOKEN)
+        assert access is not None
+        assert await provider.verify_token("wrong-token-entirely") is None
 
 
 class TestInlineTokens:

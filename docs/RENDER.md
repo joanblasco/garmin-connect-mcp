@@ -70,6 +70,62 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
   https://YOUR-SERVICE.onrender.com/mcp                # -> 401
 ```
 
+## Optional — connecting from Claude's "Connect" UI (OAuth bridge)
+
+Claude Desktop and claude.ai only support two ways to authenticate a custom connector:
+a real OAuth flow (Client ID, optional Client Secret), or an admin-only "request
+headers" beta that isn't available on every account. There's no field to paste a raw
+bearer token, so `MCP_AUTH_TOKEN` alone — while it's all `curl` or a manual MCP client
+needs — isn't enough for Claude's UI on its own.
+
+Setting `OAUTH_CLIENT_SECRET` turns on a minimal, single-client OAuth server
+(`SingleClientOAuthBridge`) that lets Claude complete its normal "Connect" flow while
+`MCP_AUTH_TOKEN` remains the actual credential underneath: the token Claude receives at
+the end of the OAuth exchange **is** `MCP_AUTH_TOKEN`, verified by the exact same
+`StaticTokenVerifier` used for direct/manual clients. Dynamic client registration is
+disabled — the only client that can ever complete the flow is the one you configure by
+hand in Claude, using the values below.
+
+### Add two more environment variables
+
+In the Render dashboard, service → **Environment** (this is a manual step — these
+variables are not in `render.yaml`, since the OAuth bridge is optional and shouldn't be
+forced on everyone who deploys the blueprint):
+
+| Variable | Value | Notes |
+| --- | --- | --- |
+| `OAUTH_CLIENT_SECRET` | `openssl rand -hex 32` | A second secret, separate from `MCP_AUTH_TOKEN`. Whoever has this can request tokens from the OAuth endpoints, so treat it the same as `MCP_AUTH_TOKEN`: nobody but you. |
+| `OAUTH_CLIENT_ID` | any short string, e.g. `garmin-connect-mcp` | Not secret — it's the public "username" side of the OAuth client. Optional: defaults to `garmin-connect-mcp` if unset. |
+
+You do **not** need to set `MCP_PUBLIC_URL` on Render — it falls back to
+`RENDER_EXTERNAL_URL`, which Render sets automatically for every web service.
+
+### Add the connector in Claude
+
+1. Claude → **Settings** → **Connectors** → **Add custom connector**
+2. URL: `https://YOUR-SERVICE.onrender.com/mcp`
+3. Authentication: **OAuth**
+   - Client ID: the `OAUTH_CLIENT_ID` value above
+   - Client Secret: the `OAUTH_CLIENT_SECRET` value above
+4. Connect. Claude redirects through `/authorize` and back with no login prompt (by
+   design — see the module docstring in `oauth_bridge.py` for why that's safe here) and
+   should show as connected immediately.
+
+### Verify the OAuth endpoints directly (optional)
+
+```bash
+# Dynamic client registration must be OFF (404 confirms it):
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://YOUR-SERVICE.onrender.com/register
+# -> 404
+
+# Discovery metadata should list /authorize and /token but no registration_endpoint:
+curl -s https://YOUR-SERVICE.onrender.com/.well-known/oauth-authorization-server
+```
+
+If Claude reports a connection error, double-check the Client ID/Secret were pasted
+without extra whitespace, and that the service has finished redeploying after you added
+the two variables (Render restarts the service on env var changes).
+
 ## Operational caveats
 
 These are properties of Garmin's unofficial API and of hosting, not of the deployment
