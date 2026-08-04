@@ -1,15 +1,22 @@
 """Garmin Connect MCP Server - Main entry point."""
 
+import os
+import sys
 from textwrap import dedent
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 
 # Load environment variables
 load_dotenv()
 
-# Initialize FastMCP server
-mcp = FastMCP("Garmin Connect")
+from .http_auth import build_auth_provider
+
+# Initialize FastMCP server. The auth provider is only active when MCP_AUTH_TOKEN is
+# set, so stdio usage is unaffected.
+mcp = FastMCP("Garmin Connect", auth=build_auth_provider())
 
 # Register middleware
 from .middleware import ConfigMiddleware
@@ -433,9 +440,54 @@ async def health_summary(period: str = "7d") -> str:
     ).strip()
 
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(_request: Request) -> PlainTextResponse:
+    """Liveness probe for hosting platforms.
+
+    Deliberately unauthenticated and free of Garmin API calls: it reports only that
+    the process is serving traffic, so it neither leaks data nor consumes the
+    account's rate limit on every probe.
+    """
+    return PlainTextResponse("ok")
+
+
+HTTP_TRANSPORTS = {"http", "sse", "streamable-http"}
+
+
 def main():
-    """Main entry point for the Garmin Connect MCP server."""
-    # Run the server with stdio transport (default)
+    """Main entry point for the Garmin Connect MCP server.
+
+    Transport is chosen by FASTMCP_TRANSPORT (default: stdio). When an HTTP
+    transport is selected the server refuses to start without MCP_AUTH_TOKEN,
+    because an open HTTP endpoint would expose the owner's Garmin account to
+    anyone who can reach the URL.
+    """
+    transport = os.environ.get("FASTMCP_TRANSPORT", "stdio").strip().lower()
+
+    if transport in HTTP_TRANSPORTS:
+        if not os.environ.get("MCP_AUTH_TOKEN", "").strip():
+            print(
+                f"Refusing to start: transport '{transport}' exposes this server over "
+                "HTTP but MCP_AUTH_TOKEN is not set, which would leave your Garmin "
+                "account readable by anyone who can reach the URL.\n"
+                "Set MCP_AUTH_TOKEN to a long random secret "
+                "(generate one with: openssl rand -hex 32).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # Host and port are passed explicitly rather than via environment variables:
+        # fastmcp.settings is populated at import time, so mutating os.environ here
+        # would be too late to take effect.
+        #
+        # Platforms such as Render assign the listening port via PORT, and containers
+        # must bind all interfaces to be reachable (FastMCP defaults to 127.0.0.1).
+        port = os.environ.get("PORT") or os.environ.get("FASTMCP_PORT") or "8000"
+        host = os.environ.get("FASTMCP_HOST") or "0.0.0.0"
+
+        mcp.run(transport=transport, host=host, port=int(port))
+        return
+
     mcp.run()
 
 

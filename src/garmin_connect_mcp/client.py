@@ -12,7 +12,7 @@ from garminconnect import (
     GarminConnectTooManyRequestsError,
 )
 
-from .auth import GarminConfig, get_token_base64_path, get_token_store
+from .auth import GarminConfig, get_token_base64_path, get_token_store, has_inline_tokens
 
 
 class GarminAPIError(Exception):
@@ -74,6 +74,14 @@ def init_garmin_client(
         Authenticated Garmin client or None on failure
     """
     try:
+        # Inline tokens take precedence: on hosts with an ephemeral disk there is no
+        # token directory to read, and this path never needs the account password.
+        if has_inline_tokens(config):
+            garmin = Garmin()
+            garmin.login(config.garmin_token_data.strip())
+            print("Logged in using inline token data from environment.", file=sys.stderr)
+            return garmin
+
         tokenstore = get_token_store()
 
         # Try token-based login first

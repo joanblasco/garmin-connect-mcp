@@ -1,0 +1,26 @@
+# Render Blueprint for the Garmin Connect MCP server over authenticated HTTP.
+#
+# Secrets are deliberately declared with `sync: false`, which makes Render prompt for
+# them in the dashboard instead of storing them in this file. Never commit the values:
+# GARMIN_TOKEN_DATA grants full read/write access to the Garmin account.
+
+services:
+  - type: web
+    name: garmin-connect-mcp
+    runtime: docker
+    dockerfilePath: ./Dockerfile.render
+    plan: free
+    # Render probes this path to decide whether the instance is healthy. The MCP
+    # endpoint requires authentication, so a dedicated unauthenticated route is used.
+    healthCheckPath: /health
+    envVars:
+      # Shared secret required to call the server. Generate with: openssl rand -hex 32
+      - key: MCP_AUTH_TOKEN
+        sync: false
+      # Serialised Garmin OAuth tokens (contents of ~/.garminconnect_base64).
+      - key: GARMIN_TOKEN_DATA
+        sync: false
+      - key: FASTMCP_TRANSPORT
+        value: http
+      - key: FASTMCP_HOST
+        value: 0.0.0.0

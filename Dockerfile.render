@@ -1,0 +1,45 @@
+# Remote HTTP deployment image (Render, Fly, Railway, ...).
+#
+# Differs from the stdio-oriented ./Dockerfile in that it listens on a TCP port and
+# requires MCP_AUTH_TOKEN. The server itself refuses to start over HTTP without that
+# secret, so a misconfigured deploy fails loudly instead of exposing Garmin data.
+
+FROM ghcr.io/astral-sh/uv:latest AS uv
+
+FROM python:3.12-slim AS builder
+
+COPY --from=uv /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Dependency manifests first so layer caching survives source-only changes.
+COPY pyproject.toml uv.lock* README.md ./
+COPY src/ ./src/
+
+RUN uv sync --frozen --no-dev
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY --from=builder /app/.venv /app/.venv
+COPY src/ ./src/
+COPY pyproject.toml ./
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    FASTMCP_TRANSPORT=http \
+    FASTMCP_HOST=0.0.0.0 \
+    FASTMCP_SHOW_SERVER_BANNER=false
+
+# Run as an unprivileged user: a compromised process should not be root, and the
+# Garmin tokens in the environment are account-level credentials.
+RUN useradd --create-home --uid 10001 appuser
+USER appuser
+
+# Render overrides this via PORT; the default matters only for local docker runs.
+ENV PORT=8000
+EXPOSE 8000
+
+ENTRYPOINT ["garmin-connect-mcp"]

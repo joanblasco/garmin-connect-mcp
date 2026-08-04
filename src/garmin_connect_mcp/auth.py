@@ -15,6 +15,10 @@ class GarminConfig(BaseSettings):
     garmin_password: str = ""
     garmintokens: str = str(Path.home() / ".garminconnect")
     garmintokens_base64: str = str(Path.home() / ".garminconnect_base64")
+    # Serialised OAuth tokens supplied inline instead of via the filesystem. Needed on
+    # hosts with an ephemeral disk (Render, Fly, Heroku) where a token directory cannot
+    # be persisted and secrets arrive as environment variables.
+    garmin_token_data: str = ""
 
     model_config = SettingsConfigDict(env_file_encoding="utf-8", case_sensitive=False)
 
@@ -34,12 +38,28 @@ def load_config() -> GarminConfig:
 
 
 def validate_credentials(config: GarminConfig) -> bool:
-    """Check if credentials are properly configured."""
+    """Check if credentials are properly configured.
+
+    Inline token data is sufficient on its own: a remote deployment can authenticate
+    from previously generated tokens without ever holding the account password.
+    """
+    if has_inline_tokens(config):
+        return True
     if not config.garmin_email or config.garmin_email == "your_email@example.com":
         return False
     if not config.garmin_password or config.garmin_password == "your_password":
         return False
     return True
+
+
+# garminconnect treats a tokenstore argument longer than this as literal token data
+# rather than a filesystem path.
+INLINE_TOKEN_MIN_LENGTH = 512
+
+
+def has_inline_tokens(config: GarminConfig) -> bool:
+    """Check whether usable inline token data was supplied via the environment."""
+    return len(config.garmin_token_data.strip()) > INLINE_TOKEN_MIN_LENGTH
 
 
 def get_token_store() -> str:
