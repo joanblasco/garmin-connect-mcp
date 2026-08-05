@@ -603,3 +603,84 @@ async def query_activity_metrics(
         )
     except Exception as e:
         return ResponseBuilder.build_error_response(str(e), "internal_error")
+
+
+async def query_weekly_trends(
+    end_date: Annotated[str | None, "Last week's end date (YYYY-MM-DD, defaults to today)"] = None,
+    weeks: Annotated[int, "Number of weeks to fetch (1-52). Default: 12"] = 12,
+    include_steps: Annotated[bool, "Include weekly step aggregates"] = True,
+    include_stress: Annotated[bool, "Include weekly average stress"] = True,
+    include_intensity_minutes: Annotated[
+        bool, "Include weekly moderate/vigorous intensity minutes"
+    ] = True,
+    ctx: Context | None = None,
+) -> str:
+    """
+    Query week-by-week aggregates: steps, average stress, and intensity minutes.
+
+    Unlike query_activity_metrics (single-day or short-range daily readings), this
+    returns Garmin's own pre-aggregated weekly buckets — useful for spotting trends
+    over months without pulling and summing daily data yourself.
+    """
+    assert ctx is not None
+    try:
+        client = await ctx.get_state("client")
+
+        if weeks < 1 or weeks > 52:
+            return ResponseBuilder.build_error_response(
+                f"Invalid weeks: {weeks}. Must be between 1 and 52.",
+                "validation_error",
+            )
+
+        end_str = (
+            parse_date_string(end_date).strftime("%Y-%m-%d")
+            if end_date
+            else parse_date_string("today").strftime("%Y-%m-%d")
+        )
+
+        trends: dict[str, Any] = {}
+
+        if include_steps:
+            try:
+                trends["weekly_steps"] = client.safe_call("get_weekly_steps", end_str, weeks)
+            except Exception:
+                trends["weekly_steps"] = None
+
+        if include_stress:
+            try:
+                trends["weekly_stress"] = client.safe_call("get_weekly_stress", end_str, weeks)
+            except Exception:
+                trends["weekly_stress"] = None
+
+        if include_intensity_minutes:
+            try:
+                start_str = (parse_date_string(end_str) - timedelta(weeks=weeks)).strftime(
+                    "%Y-%m-%d"
+                )
+                trends["weekly_intensity_minutes"] = client.safe_call(
+                    "get_weekly_intensity_minutes", start_str, end_str
+                )
+            except Exception:
+                trends["weekly_intensity_minutes"] = None
+
+        insights = []
+        available = [k for k, v in trends.items() if v is not None]
+        if available:
+            insights.append(f"Available weekly trends: {', '.join(available)}")
+        else:
+            insights.append("No weekly trend data available for this period")
+
+        return ResponseBuilder.build_response(
+            data=trends,
+            analysis={"insights": insights} if insights else None,
+            metadata={"end_date": end_str, "weeks": weeks},
+        )
+
+    except GarminAPIError as e:
+        return ResponseBuilder.build_error_response(
+            e.message,
+            "api_error",
+            ["Check your Garmin Connect credentials", "Verify your internet connection"],
+        )
+    except Exception as e:
+        return ResponseBuilder.build_error_response(str(e), "internal_error")
