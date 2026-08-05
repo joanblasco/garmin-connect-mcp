@@ -2,7 +2,69 @@
 
 import pytest
 
+from garmin_connect_mcp.client import GarminClientWrapper
 from garmin_connect_mcp.types import HeartRateData, SleepData, StepsData, StressData
+
+
+class GarminClientStub:
+    """Minimal stand-in for garminconnect.Garmin — the actual network boundary.
+
+    Tools call through GarminClientWrapper.safe_call(method_name, ...), which does
+    getattr(self.client, method_name)(...). This stub lets tests configure what each
+    method name returns (or raises) without touching the real Garmin API, while still
+    exercising the real GarminClientWrapper and its error-handling/normalization logic.
+    """
+
+    def __init__(self, **method_results):
+        self._method_results = method_results
+        self.calls: list[tuple[str, tuple, dict]] = []
+
+    def __getattr__(self, name: str):
+        if name not in self._method_results:
+            # Mirrors the real Garmin client: an unconfigured/nonexistent method name
+            # must raise AttributeError, not silently return None, so safe_call's
+            # "method not found" handling can actually be exercised.
+            raise AttributeError(name)
+
+        def _call(*args, **kwargs):
+            self.calls.append((name, args, kwargs))
+            result = self._method_results[name]
+            if isinstance(result, BaseException):
+                raise result
+            if callable(result) and not isinstance(result, type):
+                return result(*args, **kwargs)
+            return result
+
+        return _call
+
+
+@pytest.fixture
+def client_stub():
+    """A fresh GarminClientStub with no configured methods."""
+    return GarminClientStub()
+
+
+@pytest.fixture
+def wrapper(client_stub):
+    """A real GarminClientWrapper around a GarminClientStub."""
+    return GarminClientWrapper(client_stub)
+
+
+class FakeContext:
+    """Minimal stand-in for fastmcp.Context, exposing only what tools use: get_state."""
+
+    def __init__(self, client_wrapper):
+        self._client_wrapper = client_wrapper
+
+    async def get_state(self, key):
+        assert key == "client"
+        return self._client_wrapper
+
+
+@pytest.fixture
+def ctx(wrapper):
+    """A FakeContext wired to the wrapper fixture, ready to pass to any tool function."""
+    return FakeContext(wrapper)
 
 
 @pytest.fixture

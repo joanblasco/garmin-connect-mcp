@@ -10,9 +10,9 @@ A Model Context Protocol (MCP) server for Garmin Connect integration. Access you
 
 ## Overview
 
-This MCP server provides 22 tools to interact with your Garmin Connect account, organized into 8 categories:
+This MCP server provides 23 tools to interact with your Garmin Connect account, organized into 8 categories:
 
-- Activities (3 tools) - Query activities and view detailed metrics
+- Activities (4 tools) - Query activities, view detailed metrics, and edit or delete activities
 - Analysis (2 tools) - Compare activities and find similar workouts
 - Health & Wellness (4 tools) - Access health metrics, sleep, heart rate, and activity data
 - Training (3 tools) - Analyze training periods and performance trends
@@ -259,13 +259,14 @@ _Note: List-returning tools use cursor-based pagination with default limits (10 
 
 ## Available Tools
 
-### Activities (3 tools)
+### Activities (4 tools)
 
 | Tool                   | Description                                                            |
 | ---------------------- | ---------------------------------------------------------------------- |
 | `query_activities`     | Query activities with pagination (by ID, date range, or specific date) |
 | `get_activity_details` | Get comprehensive activity details (splits, weather, HR zones, gear)   |
 | `get_activity_social`  | Get social details for an activity (likes, comments, kudos)            |
+| `manage_activities`    | Rename, reclassify (with type lookup), or delete an activity — delete requires explicit confirmation |
 
 ### Analysis (2 tools)
 
@@ -322,8 +323,8 @@ _Note: List-returning tools use cursor-based pagination with default limits (10 
 
 | Tool                  | Description                                      |
 | --------------------- | ------------------------------------------------ |
-| `manage_workouts`     | Workout management (list, get, download, upload) |
-| `log_health_data`     | Log body composition, blood pressure, hydration  |
+| `manage_workouts`     | Workout management (list, get, download, upload, schedule, unschedule, delete) — delete requires explicit confirmation |
+| `log_health_data`     | Log or delete body composition, blood pressure, hydration entries |
 | `query_womens_health` | Query pregnancy and menstrual cycle data         |
 
 ## MCP Resources
