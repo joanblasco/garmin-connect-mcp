@@ -14,6 +14,31 @@ from garminconnect import (
 
 from .auth import GarminConfig, get_token_base64_path, get_token_store, has_inline_tokens
 
+_JSON_SAFE_TYPES = (dict, list, str, int, float, bool, type(None))
+
+
+def _to_json_safe(value: Any) -> Any:
+    """Normalize a garminconnect method's return value to something JSON-serializable.
+
+    Most write/delete endpoints return a 204 with no body. Some garminconnect methods
+    call `.json()` on the underlying HTTP response before returning (yielding a plain
+    dict), but others don't and hand back the raw response-like object instead — which
+    for a 204 is a library-internal sentinel class that isn't JSON-serializable. This
+    normalizes either shape so every safe_call() result is safe to embed directly in a
+    tool's response, regardless of which convention a given library method follows.
+    """
+    if isinstance(value, _JSON_SAFE_TYPES):
+        return value
+
+    json_method = getattr(value, "json", None)
+    if callable(json_method):
+        try:
+            return json_method()
+        except Exception:
+            pass
+
+    return str(value)
+
 
 class GarminAPIError(Exception):
     """Custom exception for Garmin API errors."""
@@ -173,7 +198,7 @@ class GarminClientWrapper:
         """
         try:
             method = getattr(self.client, method_name)
-            return method(*args, **kwargs)
+            return _to_json_safe(method(*args, **kwargs))
         except AttributeError as e:
             raise GarminAPIError(
                 f"Method '{method_name}' not found on Garmin client", original_error=e

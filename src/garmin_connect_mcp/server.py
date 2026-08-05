@@ -27,6 +27,7 @@ mcp.add_middleware(ConfigMiddleware())
 from .tools.activities import (
     get_activity_details,
     get_activity_social,
+    manage_activities,
     query_activities,
 )
 from .tools.analysis import (
@@ -75,6 +76,13 @@ mcp.tool(
         "openWorldHint": False,
     }
 )(get_activity_social)
+mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "openWorldHint": False,
+        "destructiveHint": True,
+    }
+)(manage_activities)
 
 # Register analysis tools
 mcp.tool(
@@ -192,7 +200,7 @@ mcp.tool(
     annotations={
         "readOnlyHint": False,
         "openWorldHint": False,
-        "destructiveHint": False,
+        "destructiveHint": True,
     }
 )(manage_workouts)
 
@@ -201,7 +209,7 @@ mcp.tool(
     annotations={
         "readOnlyHint": False,
         "openWorldHint": False,
-        "destructiveHint": False,
+        "destructiveHint": True,
     }
 )(log_health_data)
 

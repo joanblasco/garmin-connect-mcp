@@ -9,10 +9,26 @@ from ..response_builder import ResponseBuilder
 
 
 async def manage_workouts(
-    action: Annotated[str, "Action: 'list', 'get', 'download', 'upload', 'schedule'"],
-    workout_id: Annotated[int | None, "Workout ID (for get/download/schedule actions)"] = None,
+    action: Annotated[
+        str, "Action: 'list', 'get', 'download', 'upload', 'schedule', 'unschedule', 'delete'"
+    ],
+    workout_id: Annotated[
+        int | None, "Workout template ID (for get/download/schedule/delete actions)"
+    ] = None,
     workout_data: Annotated[str | None, "Workout data (for upload action)"] = None,
     date: Annotated[str | None, "Target date in YYYY-MM-DD format (for schedule action)"] = None,
+    scheduled_workout_id: Annotated[
+        int | None,
+        "Calendar scheduling ID returned by 'schedule' (for unschedule action) — "
+        "this is NOT the same as workout_id",
+    ] = None,
+    confirm_delete: Annotated[
+        bool,
+        "Must be explicitly set to true to actually delete. Deleting a workout template is "
+        "PERMANENT and cannot be undone — only pass true after the user has explicitly "
+        "confirmed, in this conversation, that they want this specific workout deleted. "
+        "Do not infer consent from a general request; ask first.",
+    ] = False,
     ctx: Context | None = None,
 ) -> str:
     """
@@ -25,6 +41,11 @@ async def manage_workouts(
     - upload: Upload a new workout
     - schedule: Place an existing workout on a calendar date (equivalent to dragging
       the workout onto a day in Garmin Connect)
+    - unschedule: Remove a workout from the calendar without deleting the template
+      (requires scheduled_workout_id, the ID returned by 'schedule', not workout_id)
+    - delete: PERMANENTLY delete a workout template from the library. IRREVERSIBLE.
+      Requires confirm_delete=true — only set this after the user has explicitly confirmed
+      they want this specific workout deleted.
     """
     assert ctx is not None
     try:
@@ -48,7 +69,7 @@ async def manage_workouts(
                     ["Provide workout_id parameter"],
                 )
 
-            workout = client.safe_call("get_workout", workout_id)
+            workout = client.safe_call("get_workout_by_id", workout_id)
             return ResponseBuilder.build_response(
                 data={"workout": workout},
                 metadata={"action": "get", "workout_id": workout_id},
@@ -104,11 +125,59 @@ async def manage_workouts(
                 metadata={"action": "schedule", "workout_id": workout_id, "date": date},
             )
 
+        elif action == "unschedule":
+            if scheduled_workout_id is None:
+                return ResponseBuilder.build_error_response(
+                    "scheduled_workout_id required for unschedule action",
+                    "invalid_parameters",
+                    [
+                        "Provide the scheduled_workout_id returned by the 'schedule' action "
+                        "(not the workout_id)"
+                    ],
+                )
+
+            result = client.safe_call("unschedule_workout", scheduled_workout_id)
+            return ResponseBuilder.build_response(
+                data={"result": result},
+                analysis={
+                    "insights": [f"Scheduled workout {scheduled_workout_id} removed from calendar"]
+                },
+                metadata={"action": "unschedule", "scheduled_workout_id": scheduled_workout_id},
+            )
+
+        elif action == "delete":
+            if workout_id is None:
+                return ResponseBuilder.build_error_response(
+                    "Workout ID required for delete action",
+                    "invalid_parameters",
+                    ["Provide workout_id parameter"],
+                )
+            if not confirm_delete:
+                return ResponseBuilder.build_error_response(
+                    "Deletion requires explicit confirmation",
+                    "confirmation_required",
+                    [
+                        "This permanently deletes the workout template and cannot be undone.",
+                        "Ask the user to explicitly confirm before retrying with "
+                        "confirm_delete=true.",
+                    ],
+                )
+
+            result = client.safe_call("delete_workout", workout_id)
+            return ResponseBuilder.build_response(
+                data={"result": result},
+                analysis={"insights": [f"Workout {workout_id} permanently deleted"]},
+                metadata={"action": "delete", "workout_id": workout_id},
+            )
+
         else:
             return ResponseBuilder.build_error_response(
                 f"Invalid action: {action}",
                 "invalid_parameters",
-                ["Valid actions: 'list', 'get', 'download', 'upload', 'schedule'"],
+                [
+                    "Valid actions: 'list', 'get', 'download', 'upload', 'schedule', "
+                    "'unschedule', 'delete'"
+                ],
             )
 
     except GarminAPIError as e:

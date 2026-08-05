@@ -863,3 +863,158 @@ async def get_activity_social(
         )
     except Exception as e:
         return ResponseBuilder.build_error_response(str(e), "internal_error")
+
+
+async def manage_activities(
+    action: Annotated[str, "Action: 'rename', 'list_types', 'set_type', 'delete'"],
+    activity_id: Annotated[int | None, "Activity ID (for rename/set_type/delete actions)"] = None,
+    name: Annotated[str | None, "New activity title (for rename action)"] = None,
+    type_key: Annotated[
+        str | None,
+        "Target activity type key, e.g. 'running', 'road_biking' (for set_type action). "
+        "Use 'list_types' first to see all valid keys — an unrecognized key returns an error "
+        "listing close matches.",
+    ] = None,
+    confirm_delete: Annotated[
+        bool,
+        "Must be explicitly set to true to actually delete. Deleting an activity is "
+        "PERMANENT and cannot be undone — only pass true after the user has explicitly "
+        "confirmed, in this conversation, that they want this specific activity deleted. "
+        "Do not infer consent from a general request; ask first.",
+    ] = False,
+    ctx: Context | None = None,
+) -> str:
+    """
+    Manage activity metadata (write operations).
+
+    Actions:
+    - rename: Set a new title for an activity
+    - list_types: List every valid activity type key Garmin recognizes, with its numeric IDs
+      (needed to build the set_type call yourself, though set_type resolves this internally
+      from type_key alone)
+    - set_type: Reclassify an activity (e.g. a run logged as 'other' becomes 'running')
+    - delete: PERMANENTLY delete an activity from Garmin Connect. IRREVERSIBLE. Requires
+      confirm_delete=true — only set this after the user has explicitly confirmed they want
+      this specific activity deleted.
+    """
+    assert ctx is not None
+    try:
+        client = await ctx.get_state("client")
+
+        if action == "rename":
+            if activity_id is None:
+                return ResponseBuilder.build_error_response(
+                    "Activity ID required for rename action",
+                    "invalid_parameters",
+                    ["Provide activity_id parameter"],
+                )
+            if not name:
+                return ResponseBuilder.build_error_response(
+                    "Name required for rename action",
+                    "invalid_parameters",
+                    ["Provide name parameter"],
+                )
+
+            result = client.safe_call("set_activity_name", activity_id, name)
+            return ResponseBuilder.build_response(
+                data={"result": result},
+                analysis={"insights": [f"Activity {activity_id} renamed to '{name}'"]},
+                metadata={"action": "rename", "activity_id": activity_id},
+            )
+
+        elif action == "list_types":
+            types = client.safe_call("get_activity_types")
+            return ResponseBuilder.build_response(
+                data={
+                    "activity_types": types,
+                    "count": len(types) if isinstance(types, list) else 0,
+                },
+                metadata={"action": "list_types"},
+            )
+
+        elif action == "set_type":
+            if activity_id is None:
+                return ResponseBuilder.build_error_response(
+                    "Activity ID required for set_type action",
+                    "invalid_parameters",
+                    ["Provide activity_id parameter"],
+                )
+            if not type_key:
+                return ResponseBuilder.build_error_response(
+                    "type_key required for set_type action",
+                    "invalid_parameters",
+                    [
+                        "Provide type_key parameter, e.g. 'running'. Use 'list_types' to see options."
+                    ],
+                )
+
+            all_types = client.safe_call("get_activity_types")
+            match = next(
+                (t for t in all_types if t.get("typeKey") == type_key),
+                None,
+            )
+            if match is None:
+                close = [
+                    t["typeKey"]
+                    for t in all_types
+                    if isinstance(t.get("typeKey"), str) and type_key in t["typeKey"]
+                ]
+                return ResponseBuilder.build_error_response(
+                    f"Unknown activity type key: '{type_key}'",
+                    "invalid_parameters",
+                    [
+                        f"Close matches: {', '.join(close)}"
+                        if close
+                        else "Use 'list_types' to see all valid keys"
+                    ],
+                )
+
+            result = client.safe_call(
+                "set_activity_type",
+                activity_id,
+                match["typeId"],
+                match["typeKey"],
+                match["parentTypeId"],
+            )
+            return ResponseBuilder.build_response(
+                data={"result": result},
+                analysis={"insights": [f"Activity {activity_id} reclassified as '{type_key}'"]},
+                metadata={"action": "set_type", "activity_id": activity_id, "type_key": type_key},
+            )
+
+        elif action == "delete":
+            if activity_id is None:
+                return ResponseBuilder.build_error_response(
+                    "Activity ID required for delete action",
+                    "invalid_parameters",
+                    ["Provide activity_id parameter"],
+                )
+            if not confirm_delete:
+                return ResponseBuilder.build_error_response(
+                    "Deletion requires explicit confirmation",
+                    "confirmation_required",
+                    [
+                        "This permanently deletes the activity and cannot be undone.",
+                        "Ask the user to explicitly confirm before retrying with "
+                        "confirm_delete=true.",
+                    ],
+                )
+
+            result = client.safe_call("delete_activity", activity_id)
+            return ResponseBuilder.build_response(
+                data={"result": result},
+                analysis={"insights": [f"Activity {activity_id} permanently deleted"]},
+                metadata={"action": "delete", "activity_id": activity_id},
+            )
+
+        else:
+            return ResponseBuilder.build_error_response(
+                f"Invalid action: {action}",
+                "invalid_parameters",
+                ["Valid actions: 'rename', 'list_types', 'set_type', 'delete'"],
+            )
+
+    except GarminAPIError as e:
+        return ResponseBuilder.build_error_response(e.message, "api_error")
+    except Exception as e:
+        return ResponseBuilder.build_error_response(str(e), "internal_error")
