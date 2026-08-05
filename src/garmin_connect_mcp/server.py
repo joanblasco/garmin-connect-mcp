@@ -35,6 +35,7 @@ from .tools.analysis import (
     find_similar_activities,
 )
 from .tools.challenges import (
+    query_badges,
     query_challenges,
     query_goals_and_records,
 )
@@ -46,11 +47,14 @@ from .tools.health_wellness import (
     query_health_summary,
     query_heart_rate_data,
     query_sleep_data,
+    query_weekly_trends,
 )
+from .tools.nutrition import query_nutrition
 from .tools.training import (
     analyze_training_period,
     get_performance_metrics,
     get_training_effect,
+    query_training_plans,
 )
 from .tools.user_profile import get_user_profile
 from .tools.weight import manage_weight_data, query_weight_data
@@ -123,6 +127,12 @@ mcp.tool(
         "openWorldHint": False,
     }
 )(query_activity_metrics)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(query_weekly_trends)
 
 # Register device & gear tools
 mcp.tool(
@@ -159,6 +169,12 @@ mcp.tool(
         "openWorldHint": False,
     }
 )(query_challenges)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(query_badges)
 
 # Register training tools
 mcp.tool(
@@ -179,6 +195,20 @@ mcp.tool(
         "openWorldHint": False,
     }
 )(get_training_effect)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(query_training_plans)
+
+# Register nutrition tools
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(query_nutrition)
 
 # Register weight tools
 mcp.tool(

@@ -10,16 +10,17 @@ A Model Context Protocol (MCP) server for Garmin Connect integration. Access you
 
 ## Overview
 
-This MCP server provides 23 tools to interact with your Garmin Connect account, organized into 8 categories:
+This MCP server provides 27 tools to interact with your Garmin Connect account, organized into 10 categories:
 
-- Activities (4 tools) - Query activities, view detailed metrics, and edit or delete activities
+- Activities (4 tools) - Query activities, view detailed metrics (incl. detailed splits), and edit or delete activities
 - Analysis (2 tools) - Compare activities and find similar workouts
-- Health & Wellness (4 tools) - Access health metrics, sleep, heart rate, and activity data
-- Training (3 tools) - Analyze training periods and performance trends
+- Health & Wellness (5 tools) - Access health metrics, sleep, heart rate, activity data, and weekly step/stress/intensity trends
+- Training (4 tools) - Analyze training periods, performance trends (incl. VO2max/HRV trends, FTP, lactate threshold), and training plans
 - User Profile (1 tool) - Access profile, statistics, and personal records
-- Challenges & Goals (2 tools) - Track goals, PRs, badges, and challenges
+- Challenges & Goals (3 tools) - Track goals, PRs, badges, badge challenges, and other challenges
 - Devices & Gear (2 tools) - Manage devices and equipment
 - Weight Management (2 tools) - Track weight data
+- Nutrition (1 tool) - Daily food log, meals, and nutrition settings
 - Other (3 tools) - Workouts, manual data entry, women's health tracking
 
 Additionally, the server provides:
@@ -264,7 +265,7 @@ _Note: List-returning tools use cursor-based pagination with default limits (10 
 | Tool                   | Description                                                            |
 | ---------------------- | ---------------------------------------------------------------------- |
 | `query_activities`     | Query activities with pagination (by ID, date range, or specific date) |
-| `get_activity_details` | Get comprehensive activity details (splits, weather, HR zones, gear)   |
+| `get_activity_details` | Get comprehensive activity details (splits, weather, HR zones, gear, optional typed splits/split summaries) |
 | `get_activity_social`  | Get social details for an activity (likes, comments, kudos)            |
 | `manage_activities`    | Rename, reclassify (with type lookup), or delete an activity — delete requires explicit confirmation |
 
@@ -275,7 +276,7 @@ _Note: List-returning tools use cursor-based pagination with default limits (10 
 | `compare_activities`      | Compare 2-5 activities side-by-side             |
 | `find_similar_activities` | Find activities similar to a reference activity |
 
-### Health & Wellness (4 tools)
+### Health & Wellness (5 tools)
 
 | Tool                     | Description                                                                   |
 | ------------------------ | ----------------------------------------------------------------------------- |
@@ -283,14 +284,16 @@ _Note: List-returning tools use cursor-based pagination with default limits (10 
 | `query_sleep_data`       | Query sleep data with stages, scores, and HRV                                 |
 | `query_heart_rate_data`  | Query heart rate data with resting HR                                         |
 | `query_activity_metrics` | Query activity metrics (steps, stress, respiration, SpO2, etc.)               |
+| `query_weekly_trends`    | Query week-by-week aggregates: steps, average stress, intensity minutes       |
 
-### Training (3 tools)
+### Training (4 tools)
 
-| Tool                      | Description                                                         |
-| ------------------------- | ------------------------------------------------------------------- |
-| `analyze_training_period` | Analyze training over a time period with insights                   |
-| `get_performance_metrics` | Get performance metrics (VO2 max, hill score, endurance, HRV, etc.) |
-| `get_training_effect`     | Get training effect and progress summary                            |
+| Tool                      | Description                                                                                 |
+| ------------------------- | --------------------------------------------------------------------------------------------- |
+| `analyze_training_period` | Analyze training over a time period with insights                                             |
+| `get_performance_metrics` | Get performance metrics (VO2 max/HRV — single day or trend, hill score, endurance, FTP, lactate threshold) |
+| `get_training_effect`     | Get training effect and progress summary                                                      |
+| `query_training_plans`    | List training plans, or get plan detail / adaptive-plan detail by ID                          |
 
 ### User Profile (1 tool)
 
@@ -298,12 +301,13 @@ _Note: List-returning tools use cursor-based pagination with default limits (10 
 | ------------------ | ---------------------------------------------------- |
 | `get_user_profile` | Get comprehensive athlete profile with stats and PRs |
 
-### Challenges & Goals (2 tools)
+### Challenges & Goals (3 tools)
 
-| Tool                      | Description                                         |
-| ------------------------- | --------------------------------------------------- |
-| `query_goals_and_records` | Query goals, personal records, and race predictions |
-| `query_challenges`        | Query challenges and badges (by status and type)    |
+| Tool                      | Description                                                            |
+| ------------------------- | ----------------------------------------------------------------------- |
+| `query_goals_and_records` | Query goals, personal records, and race predictions                     |
+| `query_challenges`        | Query badge challenges and other time-limited challenges (by status/type) |
+| `query_badges`            | Query individual achievement badges — available catalog or in-progress (paginated) |
 
 ### Devices & Gear (2 tools)
 
@@ -318,6 +322,12 @@ _Note: List-returning tools use cursor-based pagination with default limits (10 
 | -------------------- | ----------------------------------- |
 | `query_weight_data`  | Query weight data for date or range |
 | `manage_weight_data` | Add or delete weight entries        |
+
+### Nutrition (1 tool)
+
+| Tool              | Description                                          |
+| ----------------- | ----------------------------------------------------- |
+| `query_nutrition` | Query daily food log, meals, and nutrition settings |
 
 ### Other (3 tools)
 

@@ -1,7 +1,7 @@
 """Training and performance tools for Garmin Connect MCP server."""
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 from fastmcp import Context
@@ -232,24 +232,52 @@ async def analyze_training_period(
         return ResponseBuilder.build_error_response(str(e), "internal_error")
 
 
+MAX_TREND_DAYS = 90
+
+
+def _iter_dates(start_date: str, end_date: str):
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    current = start
+    while current <= end:
+        yield current.strftime("%Y-%m-%d")
+        current += timedelta(days=1)
+
+
 async def get_performance_metrics(
     date: Annotated[str | None, "Specific date (YYYY-MM-DD) for single-day metrics"] = None,
-    start_date: Annotated[str | None, "Start date (YYYY-MM-DD) for range metrics"] = None,
-    end_date: Annotated[str | None, "End date (YYYY-MM-DD) for range metrics"] = None,
-    include_vo2_max: Annotated[bool, "Include VO2 max data"] = True,
-    include_hill_score: Annotated[bool, "Include hill climbing score"] = True,
-    include_endurance_score: Annotated[bool, "Include endurance score"] = True,
-    include_hrv: Annotated[bool, "Include heart rate variability"] = True,
-    include_fitness_age: Annotated[bool, "Include fitness age calculation"] = True,
+    start_date: Annotated[str | None, "Start date (YYYY-MM-DD) for range metrics/trends"] = None,
+    end_date: Annotated[str | None, "End date (YYYY-MM-DD) for range metrics/trends"] = None,
+    include_vo2_max: Annotated[bool, "Include VO2 max (single day) or its trend (range)"] = True,
+    include_hill_score: Annotated[bool, "Include hill climbing score (range only)"] = True,
+    include_endurance_score: Annotated[bool, "Include endurance score (range only)"] = True,
+    include_hrv: Annotated[
+        bool, "Include heart rate variability (single day) or its trend (range)"
+    ] = True,
+    include_fitness_age: Annotated[bool, "Include fitness age calculation (single day only)"] = (
+        True
+    ),
+    include_ftp: Annotated[bool, "Include latest cycling Functional Threshold Power"] = False,
+    include_lactate_threshold: Annotated[
+        bool, "Include running lactate threshold (heart rate, power, speed)"
+    ] = False,
     ctx: Context | None = None,
 ) -> str:
     """
     Get comprehensive performance metrics.
 
-    Includes VO2 max, hill score, endurance score, heart rate variability,
-    and fitness age data.
+    Includes VO2 max, hill score, endurance score, heart rate variability, fitness age,
+    cycling FTP, and running lactate threshold.
 
-    Supports both single-date and date-range queries.
+    Supports both single-date and date-range queries. In range mode, VO2 max and HRV
+    become trends: since Garmin only exposes them per single day, this queries each day
+    in the range individually and returns only the days with real data. Range is capped
+    at 90 days to avoid an excessive number of API calls — use a narrower range for
+    daily-resolution trends, or a wider one only when you don't need every point.
+
+    FTP and lactate threshold aren't date-scoped the same way; they return Garmin's
+    latest known value regardless of date/range unless you ask for a range query, in
+    which case lactate threshold returns its own daily-aggregated series instead.
     """
     assert ctx is not None
     try:
@@ -269,6 +297,19 @@ async def get_performance_metrics(
             # Default to today
             is_range = False
             query_date = datetime.now().strftime("%Y-%m-%d")
+
+        if is_range:
+            span_days = (
+                datetime.strptime(query_end, "%Y-%m-%d")
+                - datetime.strptime(query_start, "%Y-%m-%d")
+            ).days + 1
+            if span_days > MAX_TREND_DAYS:
+                return ResponseBuilder.build_error_response(
+                    f"Range spans {span_days} days, which exceeds the {MAX_TREND_DAYS}-day limit "
+                    "for trend queries",
+                    "invalid_parameters",
+                    [f"Narrow start_date/end_date to {MAX_TREND_DAYS} days or fewer"],
+                )
 
         metrics_data: dict[str, Any] = {}
 
@@ -319,7 +360,61 @@ async def get_performance_metrics(
                 except Exception:
                     metrics_data["endurance_score"] = None
 
+            # VO2 max trend: Garmin has no range endpoint, so query each day and keep
+            # only the days that actually returned data.
+            if include_vo2_max:
+                trend = []
+                for day in _iter_dates(query_start, query_end):
+                    try:
+                        day_data = client.safe_call("get_max_metrics", day)
+                        if day_data:
+                            trend.append({"date": day, "vo2_max": day_data})
+                    except Exception:
+                        continue
+                metrics_data["vo2_max_trend"] = trend
+
+            # HRV trend: same story — no range endpoint on this library/API version.
+            if include_hrv:
+                trend = []
+                for day in _iter_dates(query_start, query_end):
+                    try:
+                        day_data = client.safe_call("get_hrv_data", day)
+                        if day_data:
+                            trend.append({"date": day, "hrv": day_data})
+                    except Exception:
+                        continue
+                metrics_data["hrv_trend"] = trend
+
+            # Lactate threshold as a daily-aggregated range series
+            if include_lactate_threshold:
+                try:
+                    lactate = client.safe_call(
+                        "get_lactate_threshold",
+                        latest=False,
+                        start_date=query_start,
+                        end_date=query_end,
+                        aggregation="daily",
+                    )
+                    metrics_data["lactate_threshold"] = lactate
+                except Exception:
+                    metrics_data["lactate_threshold"] = None
+
             metadata = {"start_date": query_start, "end_date": query_end}
+
+        # FTP and lactate threshold (latest snapshot) apply regardless of query mode
+        if include_ftp:
+            try:
+                ftp = client.safe_call("get_cycling_ftp")
+                metrics_data["cycling_ftp"] = ftp
+            except Exception:
+                metrics_data["cycling_ftp"] = None
+
+        if include_lactate_threshold and not is_range:
+            try:
+                lactate = client.safe_call("get_lactate_threshold")
+                metrics_data["lactate_threshold"] = lactate
+            except Exception:
+                metrics_data["lactate_threshold"] = None
 
         # Generate insights
         insights = []
@@ -328,6 +423,10 @@ async def get_performance_metrics(
             insights.append(f"Available performance metrics: {', '.join(available_metrics)}")
         else:
             insights.append("No performance metrics available for this period")
+        if "vo2_max_trend" in metrics_data:
+            insights.append(f"VO2 max trend: {len(metrics_data['vo2_max_trend'])} data point(s)")
+        if "hrv_trend" in metrics_data:
+            insights.append(f"HRV trend: {len(metrics_data['hrv_trend'])} data point(s)")
 
         return ResponseBuilder.build_response(
             data=metrics_data,
@@ -398,6 +497,59 @@ async def get_training_effect(
             e.message,
             "api_error",
             ["Check your Garmin Connect credentials", "Verify your internet connection"],
+        )
+    except Exception as e:
+        return ResponseBuilder.build_error_response(str(e), "internal_error")
+
+
+async def query_training_plans(
+    plan_id: Annotated[
+        int | None, "Specific training plan ID (omit to list all available plans)"
+    ] = None,
+    adaptive: Annotated[
+        bool, "When plan_id is given, fetch the adaptive-plan view instead of the full plan"
+    ] = False,
+    ctx: Context | None = None,
+) -> str:
+    """
+    Query Garmin Coach / structured training plans.
+
+    - Omit plan_id: list every training plan available to your account.
+    - Provide plan_id: get full details for that plan.
+    - Provide plan_id with adaptive=true: get the adaptive-training-plan view for that
+      plan instead — Garmin's version that adjusts upcoming workouts based on your
+      recent training, where available.
+    """
+    assert ctx is not None
+    try:
+        client = await ctx.get_state("client")
+
+        if plan_id is None:
+            plans = client.safe_call("get_training_plans")
+            plan_list = plans.get("trainingPlanList", []) if isinstance(plans, dict) else []
+            return ResponseBuilder.build_response(
+                data={"training_plans": plans, "count": len(plan_list)},
+                metadata={"query_type": "list"},
+            )
+
+        if adaptive:
+            plan = client.safe_call("get_adaptive_training_plan_by_id", plan_id)
+            return ResponseBuilder.build_response(
+                data={"training_plan": plan},
+                metadata={"query_type": "adaptive", "plan_id": plan_id},
+            )
+
+        plan = client.safe_call("get_training_plan_by_id", plan_id)
+        return ResponseBuilder.build_response(
+            data={"training_plan": plan},
+            metadata={"query_type": "detail", "plan_id": plan_id},
+        )
+
+    except GarminAPIError as e:
+        return ResponseBuilder.build_error_response(
+            e.message,
+            "api_error",
+            ["Check your Garmin Connect credentials", "Verify the plan ID is correct"],
         )
     except Exception as e:
         return ResponseBuilder.build_error_response(str(e), "internal_error")

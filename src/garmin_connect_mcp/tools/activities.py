@@ -650,6 +650,12 @@ async def get_activity_details(
     include_hr_zones: Annotated[bool, "Include heart rate zone data"] = True,
     include_gear: Annotated[bool, "Include gear information"] = True,
     include_exercise_sets: Annotated[bool, "Include exercise sets (for strength training)"] = False,
+    include_typed_splits: Annotated[
+        bool,
+        "Include type-specific split detail (richer than include_splits for activity types "
+        "like climbing/bouldering)",
+    ] = False,
+    include_split_summaries: Annotated[bool, "Include per-split-type summary aggregates"] = False,
     unit: Annotated[UnitSystem, "Unit system: 'metric' or 'imperial'"] = "metric",
     ctx: Context | None = None,
 ) -> str:
@@ -659,8 +665,9 @@ async def get_activity_details(
     Fetch exactly the information you need about an activity with flexible
     detail options.
 
-    By default, includes splits, weather, HR zones, and gear. Exercise sets
-    are only included when explicitly requested (useful for strength training).
+    By default, includes splits, weather, HR zones, and gear. Exercise sets and the
+    more detailed typed-splits/split-summaries views are only included when explicitly
+    requested, since most activities don't need them beyond the default splits.
 
     When include_splits=True and the activity has only 1 lap, estimated km/mile
     splits will be computed based on average pace.
@@ -748,6 +755,20 @@ async def get_activity_details(
             except Exception:
                 details["exercise_sets"] = None
 
+        if include_typed_splits:
+            try:
+                typed_splits = client.safe_call("get_activity_typed_splits", activity_id)
+                details["typed_splits"] = typed_splits
+            except Exception:
+                details["typed_splits"] = None
+
+        if include_split_summaries:
+            try:
+                split_summaries = client.safe_call("get_activity_split_summaries", activity_id)
+                details["split_summaries"] = split_summaries
+            except Exception:
+                details["split_summaries"] = None
+
         # Generate insights based on available data
         insights = []
         if details.get("weather"):
@@ -786,6 +807,8 @@ async def get_activity_details(
                     "hr_zones": include_hr_zones,
                     "gear": include_gear,
                     "exercise_sets": include_exercise_sets,
+                    "typed_splits": include_typed_splits,
+                    "split_summaries": include_split_summaries,
                 },
             },
         )
