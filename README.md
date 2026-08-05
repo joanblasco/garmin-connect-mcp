@@ -322,7 +322,7 @@ _Note: List-returning tools use cursor-based pagination with default limits (10 
 
 | Tool                  | Description                                      |
 | --------------------- | ------------------------------------------------ |
-| `manage_workouts`     | Workout management (list, get, download, upload) |
+| `manage_workouts`     | Workout management (list, get, download, upload, schedule) |
 | `log_health_data`     | Log body composition, blood pressure, hydration  |
 | `query_womens_health` | Query pregnancy and menstrual cycle data         |
 
