@@ -9,9 +9,10 @@ from ..response_builder import ResponseBuilder
 
 
 async def manage_workouts(
-    action: Annotated[str, "Action: 'list', 'get', 'download', 'upload'"],
-    workout_id: Annotated[int | None, "Workout ID (for get/download actions)"] = None,
+    action: Annotated[str, "Action: 'list', 'get', 'download', 'upload', 'schedule'"],
+    workout_id: Annotated[int | None, "Workout ID (for get/download/schedule actions)"] = None,
     workout_data: Annotated[str | None, "Workout data (for upload action)"] = None,
+    date: Annotated[str | None, "Target date in YYYY-MM-DD format (for schedule action)"] = None,
     ctx: Context | None = None,
 ) -> str:
     """
@@ -22,6 +23,8 @@ async def manage_workouts(
     - get: Get specific workout by ID
     - download: Download workout file
     - upload: Upload a new workout
+    - schedule: Place an existing workout on a calendar date (equivalent to dragging
+      the workout onto a day in Garmin Connect)
     """
     assert ctx is not None
     try:
@@ -80,11 +83,32 @@ async def manage_workouts(
                 metadata={"action": "upload"},
             )
 
+        elif action == "schedule":
+            if workout_id is None:
+                return ResponseBuilder.build_error_response(
+                    "Workout ID required for schedule action",
+                    "invalid_parameters",
+                    ["Provide workout_id parameter"],
+                )
+            if not date:
+                return ResponseBuilder.build_error_response(
+                    "Date required for schedule action",
+                    "invalid_parameters",
+                    ["Provide date parameter in YYYY-MM-DD format"],
+                )
+
+            result = client.safe_call("schedule_workout", workout_id, date)
+            return ResponseBuilder.build_response(
+                data={"scheduled_workout": result},
+                analysis={"insights": [f"Workout {workout_id} scheduled for {date}"]},
+                metadata={"action": "schedule", "workout_id": workout_id, "date": date},
+            )
+
         else:
             return ResponseBuilder.build_error_response(
                 f"Invalid action: {action}",
                 "invalid_parameters",
-                ["Valid actions: 'list', 'get', 'download', 'upload'"],
+                ["Valid actions: 'list', 'get', 'download', 'upload', 'schedule'"],
             )
 
     except GarminAPIError as e:
