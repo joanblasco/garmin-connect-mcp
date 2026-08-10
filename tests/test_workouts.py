@@ -1,4 +1,5 @@
-"""Tests for the manage_workouts tool, including the new schedule/unschedule/delete actions."""
+"""Tests for the manage_workouts tool, including the schedule/unschedule/delete/
+list_scheduled actions."""
 
 import json
 
@@ -83,10 +84,139 @@ class TestDeleteAction:
         assert _error(result)["type"] == "invalid_parameters"
 
 
+def _calendar_item(item_id, date, title="Workout", workout_id=1, item_type="workout"):
+    """A trimmed calendarItems entry shaped like Garmin's get_scheduled_workouts response."""
+    return {
+        "id": item_id,
+        "itemType": item_type,
+        "date": date,
+        "workoutId": workout_id,
+        "title": title,
+        "sportTypeKey": "cycling",
+    }
+
+
+class TestListScheduled:
+    async def test_requires_both_start_and_end_date(self, ctx):
+        result = await manage_workouts(action="list_scheduled", start_date="2026-08-01", ctx=ctx)
+
+        assert _error(result)["type"] == "invalid_parameters"
+
+    async def test_rejects_start_date_after_end_date(self, ctx):
+        result = await manage_workouts(
+            action="list_scheduled", start_date="2026-08-31", end_date="2026-08-01", ctx=ctx
+        )
+
+        assert _error(result)["type"] == "invalid_parameters"
+
+    async def test_rejects_range_spanning_too_many_months(self, ctx):
+        result = await manage_workouts(
+            action="list_scheduled", start_date="2020-01-01", end_date="2026-08-01", ctx=ctx
+        )
+
+        assert _error(result)["type"] == "invalid_parameters"
+
+    async def test_calls_get_scheduled_workouts_once_per_calendar_month_in_range(
+        self, client_stub, ctx
+    ):
+        client_stub._method_results["get_scheduled_workouts"] = {"calendarItems": []}
+
+        await manage_workouts(
+            action="list_scheduled", start_date="2026-07-15", end_date="2026-09-01", ctx=ctx
+        )
+
+        called_with = [
+            args for name, args, _ in client_stub.calls if name == "get_scheduled_workouts"
+        ]
+        assert called_with == [(2026, 7), (2026, 8), (2026, 9)]
+
+    async def test_returns_workouts_within_range_with_their_scheduled_workout_id(
+        self, client_stub, ctx
+    ):
+        client_stub._method_results["get_scheduled_workouts"] = {
+            "calendarItems": [_calendar_item(999, "2026-08-07", title="Threshold intervals")]
+        }
+
+        result = await manage_workouts(
+            action="list_scheduled", start_date="2026-08-01", end_date="2026-08-31", ctx=ctx
+        )
+
+        assert _data(result)["scheduled_workouts"] == [
+            {
+                "scheduled_workout_id": 999,
+                "workout_id": 1,
+                "name": "Threshold intervals",
+                "date": "2026-08-07",
+                "sport_type": "cycling",
+            }
+        ]
+        assert _data(result)["count"] == 1
+
+    async def test_excludes_items_outside_the_requested_range(self, client_stub, ctx):
+        # Garmin's month endpoint pads the response with a few leading/trailing days
+        # from adjacent months to fill out the calendar grid.
+        client_stub._method_results["get_scheduled_workouts"] = {
+            "calendarItems": [
+                _calendar_item(1, "2026-07-30", title="Late July"),
+                _calendar_item(2, "2026-08-15", title="Mid August"),
+                _calendar_item(3, "2026-09-02", title="Early September"),
+            ]
+        }
+
+        result = await manage_workouts(
+            action="list_scheduled", start_date="2026-08-01", end_date="2026-08-31", ctx=ctx
+        )
+
+        names = [entry["name"] for entry in _data(result)["scheduled_workouts"]]
+        assert names == ["Mid August"]
+
+    async def test_excludes_completed_activities_not_just_scheduled_workouts(
+        self, client_stub, ctx
+    ):
+        client_stub._method_results["get_scheduled_workouts"] = {
+            "calendarItems": [
+                _calendar_item(1, "2026-08-06", item_type="activity"),
+                _calendar_item(2, "2026-08-07", item_type="workout"),
+            ]
+        }
+
+        result = await manage_workouts(
+            action="list_scheduled", start_date="2026-08-01", end_date="2026-08-31", ctx=ctx
+        )
+
+        ids = [entry["scheduled_workout_id"] for entry in _data(result)["scheduled_workouts"]]
+        assert ids == [2]
+
+    async def test_dedupes_an_entry_returned_by_two_adjacent_month_fetches(self, client_stub, ctx):
+        # The calendar-grid response for a given month can include a day that also
+        # belongs to the neighbouring month's own response — same id, fetched twice.
+        boundary_item = _calendar_item(999, "2026-08-01", title="Month boundary")
+
+        def _get_scheduled_workouts(year, month):
+            return {"calendarItems": [boundary_item]}
+
+        client_stub._method_results["get_scheduled_workouts"] = _get_scheduled_workouts
+
+        result = await manage_workouts(
+            action="list_scheduled", start_date="2026-07-25", end_date="2026-08-05", ctx=ctx
+        )
+
+        assert _data(result)["count"] == 1
+
+
 class TestInvalidAction:
     async def test_unknown_action_lists_all_valid_actions_including_new_ones(self, ctx):
         result = await manage_workouts(action="bogus", ctx=ctx)
 
         suggestions = _error(result)["suggestions"][0]
-        for action in ["list", "get", "download", "upload", "schedule", "unschedule", "delete"]:
+        for action in [
+            "list",
+            "get",
+            "download",
+            "upload",
+            "schedule",
+            "unschedule",
+            "delete",
+            "list_scheduled",
+        ]:
             assert action in suggestions
