@@ -1,5 +1,6 @@
 """Workout management tools for Garmin Connect MCP server."""
 
+from datetime import datetime
 from typing import Annotated
 
 from fastmcp import Context
@@ -7,10 +8,29 @@ from fastmcp import Context
 from ..client import GarminAPIError
 from ..response_builder import ResponseBuilder
 
+# Calendar range queries fetch one API call per calendar month; cap the span so a
+# careless request can't fan out into dozens of calls.
+MAX_LIST_SCHEDULED_MONTHS = 13
+
+
+def _iter_year_months(start_date: str, end_date: str):
+    """Yield (year, month) tuples for every calendar month between two dates, inclusive."""
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        yield year, month
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+
 
 async def manage_workouts(
     action: Annotated[
-        str, "Action: 'list', 'get', 'download', 'upload', 'schedule', 'unschedule', 'delete'"
+        str,
+        "Action: 'list', 'get', 'download', 'upload', 'schedule', 'unschedule', 'delete', "
+        "'list_scheduled'",
     ],
     workout_id: Annotated[
         int | None, "Workout template ID (for get/download/schedule/delete actions)"
@@ -21,6 +41,12 @@ async def manage_workouts(
         int | None,
         "Calendar scheduling ID returned by 'schedule' (for unschedule action) — "
         "this is NOT the same as workout_id",
+    ] = None,
+    start_date: Annotated[
+        str | None, "Range start date in YYYY-MM-DD format (for list_scheduled action)"
+    ] = None,
+    end_date: Annotated[
+        str | None, "Range end date in YYYY-MM-DD format (for list_scheduled action)"
     ] = None,
     confirm_delete: Annotated[
         bool,
@@ -46,6 +72,9 @@ async def manage_workouts(
     - delete: PERMANENTLY delete a workout template from the library. IRREVERSIBLE.
       Requires confirm_delete=true — only set this after the user has explicitly confirmed
       they want this specific workout deleted.
+    - list_scheduled: List workouts already placed on the calendar within a date range
+      (requires start_date and end_date), including each entry's scheduled_workout_id —
+      needed to 'unschedule' an entry that wasn't just scheduled in this conversation.
     """
     assert ctx is not None
     try:
@@ -145,6 +174,59 @@ async def manage_workouts(
                 metadata={"action": "unschedule", "scheduled_workout_id": scheduled_workout_id},
             )
 
+        elif action == "list_scheduled":
+            if not start_date or not end_date:
+                return ResponseBuilder.build_error_response(
+                    "start_date and end_date required for list_scheduled action",
+                    "invalid_parameters",
+                    ["Provide both start_date and end_date in YYYY-MM-DD format"],
+                )
+            if start_date > end_date:
+                return ResponseBuilder.build_error_response(
+                    "start_date must not be after end_date",
+                    "invalid_parameters",
+                    ["Swap start_date and end_date, or narrow the range"],
+                )
+
+            months = list(_iter_year_months(start_date, end_date))
+            if len(months) > MAX_LIST_SCHEDULED_MONTHS:
+                return ResponseBuilder.build_error_response(
+                    f"Date range spans {len(months)} calendar months, "
+                    f"exceeding the limit of {MAX_LIST_SCHEDULED_MONTHS}",
+                    "invalid_parameters",
+                    ["Narrow start_date/end_date to a shorter range"],
+                )
+
+            # Garmin's month endpoint returns a calendar-grid view that includes a few
+            # leading/trailing days from adjacent months, so a date near a month
+            # boundary can appear twice across consecutive month fetches — dedupe by id.
+            scheduled_by_id: dict[object, dict] = {}
+            for year, month in months:
+                calendar = client.safe_call("get_scheduled_workouts", year, month)
+                for item in calendar.get("calendarItems", []):
+                    if item.get("itemType") != "workout":
+                        continue
+                    item_date = item.get("date")
+                    if item_date is None or not (start_date <= item_date <= end_date):
+                        continue
+                    scheduled_by_id[item.get("id")] = {
+                        "scheduled_workout_id": item.get("id"),
+                        "workout_id": item.get("workoutId"),
+                        "name": item.get("title"),
+                        "date": item_date,
+                        "sport_type": item.get("sportTypeKey"),
+                    }
+
+            scheduled = sorted(scheduled_by_id.values(), key=lambda entry: entry["date"])
+            return ResponseBuilder.build_response(
+                data={"scheduled_workouts": scheduled, "count": len(scheduled)},
+                metadata={
+                    "action": "list_scheduled",
+                    "start_date": start_date,
+                    "end_date": end_date,
+                },
+            )
+
         elif action == "delete":
             if workout_id is None:
                 return ResponseBuilder.build_error_response(
@@ -176,7 +258,7 @@ async def manage_workouts(
                 "invalid_parameters",
                 [
                     "Valid actions: 'list', 'get', 'download', 'upload', 'schedule', "
-                    "'unschedule', 'delete'"
+                    "'unschedule', 'delete', 'list_scheduled'"
                 ],
             )
 
