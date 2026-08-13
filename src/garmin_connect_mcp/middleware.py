@@ -10,22 +10,22 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 from .auth import load_config, validate_credentials
-from .client import GarminClientWrapper, init_garmin_client
+from .client import GarminClientInitError, GarminClientWrapper, get_cached_garmin_client
 
 
 class ConfigMiddleware(Middleware):
-    """Middleware that initializes Garmin client for all tool calls.
+    """Middleware that provides an authenticated Garmin client for all tool calls.
 
     This middleware:
     1. Loads the Garmin config from environment variables
     2. Validates that credentials are properly configured
-    3. Initializes the Garmin client
+    3. Fetches the (process-cached) authenticated Garmin client
     4. Injects the client into the context state for tools to access via ctx.get_state("client")
-    5. Raises ToolError if authentication fails
+    5. Raises ToolError with the real reason if authentication fails
     """
 
     async def on_call_tool(self, context: MiddlewareContext, call_next: Callable[..., Any]):
-        """Initialize Garmin client before every tool call."""
+        """Provide an authenticated Garmin client before every tool call."""
         # Load and validate configuration
         config = load_config()
 
@@ -35,14 +35,12 @@ class ConfigMiddleware(Middleware):
                 "Please run 'garmin-connect-mcp auth' to set up authentication."
             )
 
-        # Initialize Garmin client
-        client = init_garmin_client(config)
-        if client is None:
-            raise ToolError(
-                "Failed to initialize Garmin client. "
-                "Please run 'garmin-connect-mcp auth' to authenticate interactively. "
-                "If the problem persists, check your Garmin credentials."
-            )
+        # Reuse the cached client when possible; only logs in when there isn't one
+        # yet (or a prior live call invalidated it), instead of on every tool call.
+        try:
+            client = get_cached_garmin_client(config)
+        except GarminClientInitError as err:
+            raise ToolError(str(err)) from err
 
         client_wrapper = GarminClientWrapper(client)
 
