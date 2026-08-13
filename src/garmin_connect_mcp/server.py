@@ -265,15 +265,16 @@ mcp.tool(
 )
 async def athlete_profile_resource() -> str:
     """Provide athlete profile with stats and zones for context-aware clients."""
-    # Resources don't go through middleware, so we initialize client directly
+    # Resources don't go through middleware, so we fetch the cached client directly
     from .auth import load_config
-    from .client import GarminClientWrapper, init_garmin_client
+    from .client import GarminClientInitError, GarminClientWrapper, get_cached_garmin_client
     from .response_builder import ResponseBuilder
 
     config = load_config()
-    client = init_garmin_client(config)
-    if client is None:
-        return ResponseBuilder.build_error_response("Failed to initialize Garmin client")
+    try:
+        client = get_cached_garmin_client(config)
+    except GarminClientInitError as err:
+        return ResponseBuilder.build_error_response(str(err))
 
     wrapper = GarminClientWrapper(client)
 
@@ -304,13 +305,14 @@ async def athlete_profile_resource() -> str:
 async def training_readiness_resource() -> str:
     """Provide current training readiness, Body Battery, and recovery status."""
     from .auth import load_config
-    from .client import GarminClientWrapper, init_garmin_client
+    from .client import GarminClientInitError, GarminClientWrapper, get_cached_garmin_client
     from .response_builder import ResponseBuilder
 
     config = load_config()
-    client = init_garmin_client(config)
-    if client is None:
-        return ResponseBuilder.build_error_response("Failed to initialize Garmin client")
+    try:
+        client = get_cached_garmin_client(config)
+    except GarminClientInitError as err:
+        return ResponseBuilder.build_error_response(str(err))
 
     wrapper = GarminClientWrapper(client)
 
@@ -332,13 +334,14 @@ async def training_readiness_resource() -> str:
 async def health_today_resource() -> str:
     """Provide today's health snapshot (steps, sleep, stress, HR)."""
     from .auth import load_config
-    from .client import GarminClientWrapper, init_garmin_client
+    from .client import GarminClientInitError, GarminClientWrapper, get_cached_garmin_client
     from .response_builder import ResponseBuilder
 
     config = load_config()
-    client = init_garmin_client(config)
-    if client is None:
-        return ResponseBuilder.build_error_response("Failed to initialize Garmin client")
+    try:
+        client = get_cached_garmin_client(config)
+    except GarminClientInitError as err:
+        return ResponseBuilder.build_error_response(str(err))
 
     wrapper = GarminClientWrapper(client)
 

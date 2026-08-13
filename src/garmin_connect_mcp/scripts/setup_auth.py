@@ -5,7 +5,7 @@ import sys
 from dotenv import set_key
 
 from ..auth import GarminConfig, get_env_file_path, get_token_store
-from ..client import init_garmin_client
+from ..client import GarminClientInitError, init_garmin_client
 
 
 def main():
@@ -50,9 +50,10 @@ def main():
         return input("MFA one-time code: ").strip()
 
     config = GarminConfig(garmin_email=email, garmin_password=password)
-    client = init_garmin_client(config, prompt_mfa=prompt_for_mfa)
-
-    if client is None:
+    try:
+        init_garmin_client(config, prompt_mfa=prompt_for_mfa)
+    except GarminClientInitError:
+        # The real reason was already printed to stderr by init_garmin_client.
         print()
         print("Authentication failed.")
         print("Please check your credentials and try again.")

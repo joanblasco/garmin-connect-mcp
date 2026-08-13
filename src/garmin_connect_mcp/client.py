@@ -1,6 +1,7 @@
 """Garmin Connect API client wrapper with error handling."""
 
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -79,9 +80,50 @@ class GarminAuthenticationError(GarminAPIError):
         )
 
 
-def init_garmin_client(
-    config: GarminConfig, prompt_mfa: Callable[[], str] | None = None
-) -> Garmin | None:
+class GarminClientInitError(Exception):
+    """Raised when the Garmin client could not be authenticated/initialized.
+
+    Carries a ready-to-show message with the real underlying reason, so callers
+    (MCP tool middleware, resource handlers) can surface it directly to the end
+    user instead of it only being visible in server logs.
+    """
+
+    def __init__(self, message: str, original_error: Exception | None = None):
+        self.original_error = original_error
+        super().__init__(message)
+
+
+# Login failures that come back from Garmin's profile/settings endpoints after an
+# otherwise-successful authentication step match a known, still-open issue in the
+# underlying garminconnect library rather than bad credentials on our end:
+# https://github.com/cyberjunky/python-garminconnect/issues/369 (and #357). Garmin's
+# API has been rejecting freshly-issued tokens there intermittently since mid-2026.
+_PROFILE_FETCH_HINT = (
+    "Garmin's profile/settings endpoint rejected an otherwise-valid login. This "
+    "matches a known, still-open issue in the underlying garminconnect library "
+    "(github.com/cyberjunky/python-garminconnect#369) rather than a problem with "
+    "your credentials, and is often transient — retrying usually works. If it keeps "
+    "happening, re-authenticate with 'garmin-connect-mcp auth'."
+)
+_GENERIC_AUTH_HINT = (
+    "Check that your Garmin credentials/tokens are still valid, or re-authenticate "
+    "with 'garmin-connect-mcp auth'."
+)
+
+
+def _describe_auth_error(err: GarminConnectAuthenticationError) -> str:
+    """Build a user-facing message for a Garmin login failure, with a targeted hint."""
+    reason = str(err)
+    reason_lower = reason.lower()
+    hint = (
+        _PROFILE_FETCH_HINT
+        if "social profile" in reason_lower or "user settings" in reason_lower
+        else _GENERIC_AUTH_HINT
+    )
+    return f"Garmin authentication failed: {reason}. {hint}"
+
+
+def init_garmin_client(config: GarminConfig, prompt_mfa: Callable[[], str] | None = None) -> Garmin:
     """
     Initialize and authenticate Garmin client.
 
@@ -96,7 +138,12 @@ def init_garmin_client(
             interactive setup flows, not MCP runtime.
 
     Returns:
-        Authenticated Garmin client or None on failure
+        Authenticated Garmin client.
+
+    Raises:
+        GarminClientInitError: Authentication/initialization failed. The message
+            includes the real underlying reason so it's safe to show directly to
+            the end user, not just log server-side.
     """
     try:
         # Inline tokens take precedence: on hosts with an ephemeral disk there is no
@@ -153,19 +200,119 @@ def init_garmin_client(
             return garmin
 
     except GarminConnectAuthenticationError as err:
-        print(f"Authentication error: {err}", file=sys.stderr)
-        return None
+        message = _describe_auth_error(err)
+        print(message, file=sys.stderr)
+        raise GarminClientInitError(message, original_error=err) from err
 
     except GarminConnectTooManyRequestsError as err:
-        print(f"Rate limit error: {err}", file=sys.stderr)
-        return None
+        message = (
+            f"Garmin rate-limited the login attempt: {err}. Wait a few minutes before retrying."
+        )
+        print(message, file=sys.stderr)
+        raise GarminClientInitError(message, original_error=err) from err
 
     except Exception as err:
-        print(f"Unexpected error during login: {err}", file=sys.stderr)
+        message = f"Unexpected error during Garmin login: {err}"
+        print(message, file=sys.stderr)
         import traceback
 
         traceback.print_exc(file=sys.stderr)
-        return None
+        raise GarminClientInitError(message, original_error=err) from err
+
+
+class GarminClientCache:
+    """Process-wide cache for the authenticated Garmin client.
+
+    garminconnect's login() always ends with a round trip to Garmin's
+    `/userprofile-service/socialProfile` endpoint, which is known to be
+    intermittently flaky server-side (see GarminClientInitError's docstring /
+    python-garminconnect#357, #369). Its request layer also already refreshes an
+    expiring or rejected token transparently on ordinary API calls (see
+    garminconnect's Client._run_request), so there's no need to repeat the full
+    login flow on every tool call — doing so only multiplies exposure to that
+    flaky endpoint and to Garmin's own login rate limits.
+
+    This cache keeps one authenticated client per distinct config for the life of
+    the process, re-authenticating only when the config changes or invalidate()
+    is called.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._client: Garmin | None = None
+        self._cached_fingerprint: tuple[str, str, str, str] | None = None
+
+    @staticmethod
+    def _fingerprint(config: GarminConfig) -> tuple[str, str, str, str]:
+        return (
+            config.garmin_email,
+            config.garmin_password,
+            config.garmintokens,
+            config.garmin_token_data,
+        )
+
+    def get_client(
+        self, config: GarminConfig, prompt_mfa: Callable[[], str] | None = None
+    ) -> Garmin:
+        """Return the cached client, authenticating first if there isn't one yet.
+
+        Raises:
+            GarminClientInitError: See init_garmin_client.
+        """
+        fingerprint = self._fingerprint(config)
+        with self._lock:
+            if self._client is not None and self._cached_fingerprint == fingerprint:
+                return self._client
+
+            try:
+                client = init_garmin_client(config, prompt_mfa)
+            except GarminClientInitError:
+                # Never serve a stale entry after a failed re-authentication attempt.
+                self._client = None
+                self._cached_fingerprint = None
+                raise
+
+            self._client = client
+            self._cached_fingerprint = fingerprint
+            return client
+
+    def invalidate(self) -> None:
+        """Drop the cached client, forcing the next get_client() to re-authenticate.
+
+        Called after a live API call comes back with an authentication error: the
+        cached client looked fine when it was cached but is no longer trustworthy.
+        """
+        with self._lock:
+            self._client = None
+            self._cached_fingerprint = None
+
+
+_client_cache = GarminClientCache()
+
+
+def get_cached_garmin_client(
+    config: GarminConfig, prompt_mfa: Callable[[], str] | None = None
+) -> Garmin:
+    """Return a cached, authenticated Garmin client, logging in only when needed.
+
+    This is the entry point tool middleware and resource handlers should use
+    instead of calling init_garmin_client() directly, so repeated calls within
+    the same process reuse one login instead of repeating it every time.
+
+    Raises:
+        GarminClientInitError: See init_garmin_client.
+    """
+    return _client_cache.get_client(config, prompt_mfa)
+
+
+def invalidate_cached_garmin_client() -> None:
+    """Force the next get_cached_garmin_client() call to re-authenticate.
+
+    Call this after a live Garmin API call fails with an authentication error, so
+    a client that looked valid at cache time but has since been rejected doesn't
+    keep getting reused.
+    """
+    _client_cache.invalidate()
 
 
 class GarminClientWrapper:
@@ -204,6 +351,10 @@ class GarminClientWrapper:
                 f"Method '{method_name}' not found on Garmin client", original_error=e
             ) from e
         except GarminConnectAuthenticationError as e:
+            # The cached client looked fine when it was cached but Garmin is now
+            # rejecting it live — drop it so the next call re-authenticates instead
+            # of repeating the same failure indefinitely.
+            invalidate_cached_garmin_client()
             raise GarminAuthenticationError(original_error=e) from e
         except GarminConnectTooManyRequestsError as e:
             raise GarminRateLimitError(original_error=e) from e
@@ -215,6 +366,7 @@ class GarminClientWrapper:
             elif "404" in error_str or "Not Found" in error_str:
                 raise GarminNotFoundError(original_error=e) from e
             elif "401" in error_str or "403" in error_str or "Unauthorized" in error_str:
+                invalidate_cached_garmin_client()
                 raise GarminAuthenticationError(original_error=e) from e
             else:
                 raise GarminAPIError(f"Garmin API error: {str(e)}", original_error=e) from e
