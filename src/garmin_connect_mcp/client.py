@@ -94,16 +94,17 @@ class GarminClientInitError(Exception):
 
 
 # Login failures that come back from Garmin's profile/settings endpoints after an
-# otherwise-successful authentication step match a known, still-open issue in the
-# underlying garminconnect library rather than bad credentials on our end:
-# https://github.com/cyberjunky/python-garminconnect/issues/369 (and #357). Garmin's
-# API has been rejecting freshly-issued tokens there intermittently since mid-2026.
+# otherwise-successful authentication step used to match a known garminconnect issue
+# (https://github.com/cyberjunky/python-garminconnect/issues/369, and #357): Garmin's
+# API intermittently rejected freshly-issued tokens there. That was fixed upstream in
+# garminconnect 0.3.5 (in-chain token validation — a token the API rejects is now
+# discarded and the next login strategy is tried automatically) and issue #369 is
+# closed; we pin >=0.3.10 as of 2026-08-14. Keeping the hint below since the fetch can
+# still fail transiently (e.g. a real 5xx from Garmin).
 _PROFILE_FETCH_HINT = (
-    "Garmin's profile/settings endpoint rejected an otherwise-valid login. This "
-    "matches a known, still-open issue in the underlying garminconnect library "
-    "(github.com/cyberjunky/python-garminconnect#369) rather than a problem with "
-    "your credentials, and is often transient — retrying usually works. If it keeps "
-    "happening, re-authenticate with 'garmin-connect-mcp auth'."
+    "Garmin's profile/settings endpoint rejected an otherwise-valid login. This is "
+    "often transient — retrying usually works. If it keeps happening, re-authenticate "
+    "with 'garmin-connect-mcp auth'."
 )
 _GENERIC_AUTH_HINT = (
     "Check that your Garmin credentials/tokens are still valid, or re-authenticate "

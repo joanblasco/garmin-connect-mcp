@@ -119,7 +119,7 @@ class TestInitGarminClient:
 
         monkeypatch.setattr(garminconnect.Garmin, "login", fail_login)
 
-        with pytest.raises(GarminClientInitError, match="python-garminconnect#369"):
+        with pytest.raises(GarminClientInitError, match="often transient"):
             init_garmin_client(_make_config(tmp_path))
 
     def test_gives_generic_hint_for_other_authentication_failures(self, tmp_path, monkeypatch):
@@ -132,7 +132,7 @@ class TestInitGarminClient:
             init_garmin_client(_make_config(tmp_path))
 
         message = str(exc_info.value)
-        assert "python-garminconnect#369" not in message
+        assert "often transient" not in message
         assert "re-authenticate with 'garmin-connect-mcp auth'" in message
 
     def test_raises_client_init_error_on_rate_limit(self, tmp_path, monkeypatch):
