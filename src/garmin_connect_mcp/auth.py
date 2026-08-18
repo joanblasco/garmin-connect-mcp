@@ -20,7 +20,14 @@ class GarminConfig(BaseSettings):
     # be persisted and secrets arrive as environment variables.
     garmin_token_data: str = ""
 
-    model_config = SettingsConfigDict(env_file_encoding="utf-8", case_sensitive=False)
+    # extra="ignore": the .env file is shared with other tool sets (e.g. Intervals.icu,
+    # see intervals_auth.IntervalsConfig) that declare their own unrelated variables in
+    # the same file. pydantic-settings' dotenv-file source defaults to "forbid" and
+    # would otherwise raise a ValidationError for every key GarminConfig doesn't itself
+    # declare.
+    model_config = SettingsConfigDict(
+        env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
+    )
 
 
 def get_env_file_path() -> Path:

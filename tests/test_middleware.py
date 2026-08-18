@@ -28,7 +28,25 @@ async def _call_next(context):
     return "tool-result"
 
 
+class FakeToolCallMessage:
+    """Minimal stand-in for the CallToolRequestParams message: exposes only `name`."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+
 class TestConfigMiddleware:
+    async def test_bypasses_garmin_auth_entirely_for_intervals_tools(self, monkeypatch):
+        # Deliberately don't stub load_config/validate_credentials/get_cached_garmin_client:
+        # if the middleware touched any of them for an intervals_* tool call, this would
+        # fail with an AttributeError/real network attempt instead of silently passing.
+        middleware = ConfigMiddleware()
+        context = MiddlewareContext(message=FakeToolCallMessage("intervals_list_activities"))
+
+        result = await middleware.on_call_tool(context, _call_next)
+
+        assert result == "tool-result"
+
     async def test_raises_tool_error_when_credentials_not_configured(self, monkeypatch):
         monkeypatch.setattr("garmin_connect_mcp.middleware.load_config", lambda: GarminConfig())
         monkeypatch.setattr(

@@ -1,8 +1,11 @@
 """Pytest configuration and shared fixtures."""
 
+import httpx
 import pytest
 
 from garmin_connect_mcp.client import GarminClientWrapper
+from garmin_connect_mcp.intervals_auth import IntervalsConfig
+from garmin_connect_mcp.intervals_client import IntervalsClientWrapper
 from garmin_connect_mcp.types import HeartRateData, SleepData, StepsData, StressData
 
 
@@ -65,6 +68,34 @@ class FakeContext:
 def ctx(wrapper):
     """A FakeContext wired to the wrapper fixture, ready to pass to any tool function."""
     return FakeContext(wrapper)
+
+
+@pytest.fixture
+def intervals_config() -> IntervalsConfig:
+    """An IntervalsConfig with fake-but-valid-shaped credentials for tests."""
+    return IntervalsConfig(intervals_api_key="test-api-key", intervals_athlete_id="i12345")
+
+
+@pytest.fixture
+def make_intervals_wrapper(intervals_config):
+    """Factory for an IntervalsClientWrapper backed by an httpx.MockTransport.
+
+    This is the real network boundary for Intervals.icu: mocking here (instead of
+    stubbing IntervalsClientWrapper's own methods) exercises the wrapper's actual
+    URL/param construction, auth, and error-mapping logic, while faking only the
+    server response — matching how client_stub/wrapper fake the Garmin boundary.
+    """
+
+    def _make(handler, config=None):
+        transport = httpx.MockTransport(handler)
+        return IntervalsClientWrapper(config or intervals_config, transport=transport)
+
+    return _make
+
+
+def json_response(payload, status_code: int = 200) -> httpx.Response:
+    """Build an httpx.Response carrying a JSON body, for use in MockTransport handlers."""
+    return httpx.Response(status_code, json=payload)
 
 
 @pytest.fixture

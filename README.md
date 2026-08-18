@@ -10,7 +10,7 @@ A Model Context Protocol (MCP) server for Garmin Connect integration. Access you
 
 ## Overview
 
-This MCP server provides 27 tools to interact with your Garmin Connect account, organized into 10 categories:
+This MCP server provides 31 tools across two independent data sources, organized into 11 categories:
 
 - Activities (4 tools) - Query activities, view detailed metrics (incl. detailed splits), and edit or delete activities
 - Analysis (2 tools) - Compare activities and find similar workouts
@@ -22,6 +22,7 @@ This MCP server provides 27 tools to interact with your Garmin Connect account, 
 - Weight Management (2 tools) - Track weight data
 - Nutrition (1 tool) - Daily food log, meals, and nutrition settings
 - Other (3 tools) - Workouts, manual data entry, women's health tracking
+- Intervals.icu (4 tools, optional) - Activities, training load (CTL/ATL/TSB), and planned-workout calendar from a separate Intervals.icu account — see [Intervals.icu Integration](#intervalsicu-integration-optional)
 
 Additionally, the server provides:
 
@@ -207,6 +208,24 @@ uv run garmin-connect-mcp auth
 
 Replace `/ABSOLUTE/PATH/TO/.garminconnect-docker` with the absolute path to your token directory. On Windows, use something like `C:\\Users\\YOUR_USERNAME\\.garminconnect-docker`.
 
+## Intervals.icu Integration (Optional)
+
+A separate, independent tool set for [Intervals.icu](https://intervals.icu) — a training analysis platform that ingests activities from Garmin, Strava, Wahoo, Zwift, and others, and natively calculates training load (CTL/ATL/TSB). This is entirely optional: if the environment variables below aren't set, the Intervals.icu tools return a clear "not configured" error but every Garmin tool keeps working normally (and vice versa — Garmin credentials are never required to use the Intervals.icu tools).
+
+Unlike Garmin, Intervals.icu authenticates with a simple API key rather than a login/token flow, so there's no `auth` setup command — just two environment variables:
+
+1. Log in to [intervals.icu](https://intervals.icu) and open **Settings > Developer Settings**.
+2. Generate an API key.
+3. Note your Athlete ID (shown on the same page, formatted like `i12345`).
+4. Add both to your `.env` (or `~/.garminconnect.env`, or however you're passing environment variables to the server):
+
+```bash
+INTERVALS_API_KEY=your_api_key
+INTERVALS_ATHLETE_ID=i12345
+```
+
+No other configuration is needed — the server picks these up automatically on the next tool call.
+
 ## Usage
 
 Ask Claude to interact with your Garmin data using natural language. The server provides tools, resources, and prompt templates to help you get started.
@@ -337,6 +356,17 @@ _Note: List-returning tools use cursor-based pagination with default limits (10 
 | `log_health_data`     | Log or delete body composition, blood pressure, hydration entries |
 | `query_womens_health` | Query pregnancy and menstrual cycle data         |
 
+### Intervals.icu (4 tools, optional)
+
+Requires `INTERVALS_API_KEY` and `INTERVALS_ATHLETE_ID` — see [Intervals.icu Integration](#intervalsicu-integration-optional). A separate data source from the tools above; not affected by Garmin credentials.
+
+| Tool                          | Description                                                             |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| `intervals_list_activities`    | List activities for a date range, most recent first, optionally filtered by type |
+| `intervals_get_activity_details` | Get full details for a single activity, incl. training load and zone distribution |
+| `intervals_get_training_load`  | Get CTL/ATL/TSB ("Fitness"/"Fatigue"/"Form") for a date or date range   |
+| `intervals_get_calendar`       | Query the calendar of planned workouts and other events                |
+
 ## MCP Resources
 
 Resources provide ongoing context to the LLM without requiring explicit tool calls:
@@ -366,4 +396,4 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Disclaimer
 
-This project is not affiliated with, endorsed by, or sponsored by Garmin Ltd. or any of its affiliates. All product names, logos, and brands are property of their respective owners.
+This project is not affiliated with, endorsed by, or sponsored by Garmin Ltd. or Intervals.icu, or any of their affiliates. All product names, logos, and brands are property of their respective owners.

@@ -26,6 +26,14 @@ class ConfigMiddleware(Middleware):
 
     async def on_call_tool(self, context: MiddlewareContext, call_next: Callable[..., Any]):
         """Provide an authenticated Garmin client before every tool call."""
+        # Intervals.icu tools (tools/intervals.py) are a separate data source: they
+        # authenticate independently via INTERVALS_API_KEY/INTERVALS_ATHLETE_ID and
+        # fetch their own client directly, so they must not be blocked behind Garmin
+        # credentials being configured.
+        tool_name = getattr(context.message, "name", "")
+        if tool_name.startswith("intervals_"):
+            return await call_next(context)
+
         # Load and validate configuration
         config = load_config()
 

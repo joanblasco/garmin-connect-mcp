@@ -49,6 +49,12 @@ from .tools.health_wellness import (
     query_sleep_data,
     query_weekly_trends,
 )
+from .tools.intervals import (
+    intervals_get_activity_details,
+    intervals_get_calendar,
+    intervals_get_training_load,
+    intervals_list_activities,
+)
 from .tools.nutrition import query_nutrition
 from .tools.training import (
     analyze_training_period,
@@ -250,6 +256,32 @@ mcp.tool(
         "openWorldHint": False,
     }
 )(query_womens_health)
+
+# Register Intervals.icu tools (separate data source, see tools/intervals.py)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(intervals_list_activities)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(intervals_get_activity_details)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(intervals_get_training_load)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(intervals_get_calendar)
 
 
 # ============================================================================
