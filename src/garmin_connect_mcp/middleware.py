@@ -12,6 +12,12 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 from .auth import load_config, validate_credentials
 from .client import GarminClientInitError, GarminClientWrapper, get_cached_garmin_client
 
+# Tool-name prefixes for data sources that authenticate independently of Garmin
+# (Intervals.icu, and the weather providers under tools/{open_meteo,aemet,meteocat}.py)
+# — none of them should be blocked behind Garmin credentials being configured.
+# Adding a future independent data source only requires adding its prefix here.
+_NON_GARMIN_TOOL_PREFIXES = ("intervals_", "weather_")
+
 
 class ConfigMiddleware(Middleware):
     """Middleware that provides an authenticated Garmin client for all tool calls.
@@ -26,12 +32,8 @@ class ConfigMiddleware(Middleware):
 
     async def on_call_tool(self, context: MiddlewareContext, call_next: Callable[..., Any]):
         """Provide an authenticated Garmin client before every tool call."""
-        # Intervals.icu tools (tools/intervals.py) are a separate data source: they
-        # authenticate independently via INTERVALS_API_KEY/INTERVALS_ATHLETE_ID and
-        # fetch their own client directly, so they must not be blocked behind Garmin
-        # credentials being configured.
         tool_name = getattr(context.message, "name", "")
-        if tool_name.startswith("intervals_"):
+        if tool_name.startswith(_NON_GARMIN_TOOL_PREFIXES):
             return await call_next(context)
 
         # Load and validate configuration

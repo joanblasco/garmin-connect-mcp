@@ -30,6 +30,7 @@ from .tools.activities import (
     manage_activities,
     query_activities,
 )
+from .tools.aemet import weather_aemet_forecast_daily, weather_aemet_forecast_hourly
 from .tools.analysis import (
     compare_activities,
     find_similar_activities,
@@ -55,7 +56,13 @@ from .tools.intervals import (
     intervals_get_training_load,
     intervals_list_activities,
 )
+from .tools.meteocat import (
+    weather_meteocat_forecast_hourly,
+    weather_meteocat_forecast_municipal,
+    weather_meteocat_uv_index,
+)
 from .tools.nutrition import query_nutrition
+from .tools.open_meteo import weather_openmeteo_current, weather_openmeteo_forecast
 from .tools.training import (
     analyze_training_period,
     get_performance_metrics,
@@ -282,6 +289,51 @@ mcp.tool(
         "openWorldHint": False,
     }
 )(intervals_get_calendar)
+
+# Register weather tools (separate data sources, see tools/open_meteo.py,
+# tools/aemet.py, tools/meteocat.py)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(weather_openmeteo_current)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(weather_openmeteo_forecast)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(weather_aemet_forecast_daily)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(weather_aemet_forecast_hourly)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(weather_meteocat_forecast_municipal)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(weather_meteocat_forecast_hourly)
+mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+    }
+)(weather_meteocat_uv_index)
 
 
 # ============================================================================

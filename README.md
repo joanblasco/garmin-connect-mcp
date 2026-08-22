@@ -10,7 +10,7 @@ A Model Context Protocol (MCP) server for Garmin Connect integration. Access you
 
 ## Overview
 
-This MCP server provides 31 tools across two independent data sources, organized into 11 categories:
+This MCP server provides 38 tools across four independent data sources, organized into 12 categories:
 
 - Activities (4 tools) - Query activities, view detailed metrics (incl. detailed splits), and edit or delete activities
 - Analysis (2 tools) - Compare activities and find similar workouts
@@ -23,6 +23,7 @@ This MCP server provides 31 tools across two independent data sources, organized
 - Nutrition (1 tool) - Daily food log, meals, and nutrition settings
 - Other (3 tools) - Workouts, manual data entry, women's health tracking
 - Intervals.icu (4 tools, optional) - Activities, training load (CTL/ATL/TSB), and planned-workout calendar from a separate Intervals.icu account — see [Intervals.icu Integration](#intervalsicu-integration-optional)
+- Weather (7 tools, optional) - Forecasts from Open-Meteo (global, no key needed), AEMET (Spain), and MeteoCat (Catalonia) — see [Weather Integration](#weather-integration-optional)
 
 Additionally, the server provides:
 
@@ -226,6 +227,47 @@ INTERVALS_ATHLETE_ID=i12345
 
 No other configuration is needed — the server picks these up automatically on the next tool call.
 
+## Weather Integration (Optional)
+
+Three more separate, independent tool sets for weather forecasts. Like Intervals.icu, none of these require Garmin credentials (or each other) — each is entirely optional and only its own tools are affected if it isn't configured.
+
+### Open-Meteo
+
+No setup needed — [Open-Meteo](https://open-meteo.com) is free for non-commercial use (up to 10,000 calls/day) and needs no API key or registration. Works for any location worldwide.
+
+### AEMET (Spain)
+
+[AEMET](https://opendata.aemet.es) is Spain's national meteorological agency. Free, low-friction setup:
+
+1. Request a key at [opendata.aemet.es/centrodedescargas/inicio](https://opendata.aemet.es/centrodedescargas/inicio) with just your email — the key arrives by email almost instantly.
+2. Add it to your `.env`:
+
+```bash
+AEMET_API_KEY=your_api_key
+```
+
+AEMET's tools take a `municipio_code` — its own 5-digit INE municipality code (e.g. `08019` for Barcelona), not interchangeable with MeteoCat's codes below.
+
+### MeteoCat (Catalonia)
+
+[MeteoCat](https://www.meteo.cat) (Servei Meteorològic de Catalunya) covers Catalonia specifically. Free, but **registration has real friction** — plan for it:
+
+- The registration form requires a **NIF/CIF**, even for personal/citizen use.
+- You must explicitly choose which data subscription(s) to request — these tools only need the **"Predicció"** (forecast) subscription.
+- Approval can take **up to ~7 days** to arrive by email after submitting the form.
+
+Register at [apidocs.meteocat.gencat.cat](https://apidocs.meteocat.gencat.cat/documentacio/acces-ciutada-i-administracio/), then add the key once it arrives:
+
+```bash
+METEOCAT_API_KEY=your_api_key
+```
+
+MeteoCat's tools take a `codi_municipi` — MeteoCat's own municipality code, not interchangeable with AEMET's INE codes above. Only forecast endpoints are covered; live station observations (XEMA) require a separate subscription and lookup scheme and are out of scope for now.
+
+### AVAMET (not included)
+
+[AVAMET](https://www.avamet.org) (an amateur weather-station network covering Catalonia/Valencia) was investigated but isn't included: it has no public, self-service developer API — only a website and mobile app for viewing station data. If that changes, it can be added following the same pattern as the providers above.
+
 ## Usage
 
 Ask Claude to interact with your Garmin data using natural language. The server provides tools, resources, and prompt templates to help you get started.
@@ -367,6 +409,38 @@ Requires `INTERVALS_API_KEY` and `INTERVALS_ATHLETE_ID` — see [Intervals.icu I
 | `intervals_get_training_load`  | Get CTL/ATL/TSB ("Fitness"/"Fatigue"/"Form") for a date or date range   |
 | `intervals_get_calendar`       | Query the calendar of planned workouts and other events                |
 
+### Weather (7 tools, optional)
+
+Three independent data sources, none affected by Garmin/Intervals.icu credentials or each other — see [Weather Integration](#weather-integration-optional).
+
+#### Open-Meteo
+
+No configuration required.
+
+| Tool | Description |
+| ---- | ----------- |
+| `weather_openmeteo_current` | Current conditions (temperature, humidity, precipitation, wind) for any location worldwide |
+| `weather_openmeteo_forecast` | Daily (and optionally hourly) forecast, up to 16 days ahead, for any location worldwide |
+
+#### AEMET (Spain)
+
+Requires `AEMET_API_KEY`.
+
+| Tool | Description |
+| ---- | ----------- |
+| `weather_aemet_forecast_daily` | Official 8-day daily forecast for a Spanish municipality (INE code) |
+| `weather_aemet_forecast_hourly` | Official 72-hour hourly forecast for a Spanish municipality (INE code) |
+
+#### MeteoCat (Catalonia)
+
+Requires `METEOCAT_API_KEY`.
+
+| Tool | Description |
+| ---- | ----------- |
+| `weather_meteocat_forecast_municipal` | Official 8-day forecast for a Catalan municipality |
+| `weather_meteocat_forecast_hourly` | Official 72-hour hourly forecast for a Catalan municipality |
+| `weather_meteocat_uv_index` | Official 3-day UV index forecast for a Catalan municipality |
+
 ## MCP Resources
 
 Resources provide ongoing context to the LLM without requiring explicit tool calls:
@@ -396,4 +470,4 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Disclaimer
 
-This project is not affiliated with, endorsed by, or sponsored by Garmin Ltd. or Intervals.icu, or any of their affiliates. All product names, logos, and brands are property of their respective owners.
+This project is not affiliated with, endorsed by, or sponsored by Garmin Ltd., Intervals.icu, AEMET, the Servei Meteorològic de Catalunya (MeteoCat), Open-Meteo, or any of their affiliates. All product names, logos, and brands are property of their respective owners.

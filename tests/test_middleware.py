@@ -47,6 +47,16 @@ class TestConfigMiddleware:
 
         assert result == "tool-result"
 
+    async def test_bypasses_garmin_auth_entirely_for_weather_tools(self, monkeypatch):
+        # Same guarantee as above, for the shared "weather_" prefix used by all
+        # weather providers (Open-Meteo, AEMET, MeteoCat).
+        middleware = ConfigMiddleware()
+        context = MiddlewareContext(message=FakeToolCallMessage("weather_openmeteo_forecast"))
+
+        result = await middleware.on_call_tool(context, _call_next)
+
+        assert result == "tool-result"
+
     async def test_raises_tool_error_when_credentials_not_configured(self, monkeypatch):
         monkeypatch.setattr("garmin_connect_mcp.middleware.load_config", lambda: GarminConfig())
         monkeypatch.setattr(

@@ -3,9 +3,14 @@
 import httpx
 import pytest
 
+from garmin_connect_mcp.aemet_auth import AemetConfig
+from garmin_connect_mcp.aemet_client import AemetClientWrapper
 from garmin_connect_mcp.client import GarminClientWrapper
 from garmin_connect_mcp.intervals_auth import IntervalsConfig
 from garmin_connect_mcp.intervals_client import IntervalsClientWrapper
+from garmin_connect_mcp.meteocat_auth import MeteocatConfig
+from garmin_connect_mcp.meteocat_client import MeteocatClientWrapper
+from garmin_connect_mcp.open_meteo_client import OpenMeteoClientWrapper
 from garmin_connect_mcp.types import HeartRateData, SleepData, StepsData, StressData
 
 
@@ -96,6 +101,54 @@ def make_intervals_wrapper(intervals_config):
 def json_response(payload, status_code: int = 200) -> httpx.Response:
     """Build an httpx.Response carrying a JSON body, for use in MockTransport handlers."""
     return httpx.Response(status_code, json=payload)
+
+
+@pytest.fixture
+def make_open_meteo_wrapper():
+    """Factory for an OpenMeteoClientWrapper backed by an httpx.MockTransport.
+
+    No config fixture needed — Open-Meteo takes no credentials.
+    """
+
+    def _make(handler):
+        transport = httpx.MockTransport(handler)
+        return OpenMeteoClientWrapper(transport=transport)
+
+    return _make
+
+
+@pytest.fixture
+def aemet_config() -> AemetConfig:
+    """An AemetConfig with a fake-but-valid-shaped credential for tests."""
+    return AemetConfig(aemet_api_key="test-api-key")
+
+
+@pytest.fixture
+def make_aemet_wrapper(aemet_config):
+    """Factory for an AemetClientWrapper backed by an httpx.MockTransport."""
+
+    def _make(handler, config=None):
+        transport = httpx.MockTransport(handler)
+        return AemetClientWrapper(config or aemet_config, transport=transport)
+
+    return _make
+
+
+@pytest.fixture
+def meteocat_config() -> MeteocatConfig:
+    """A MeteocatConfig with a fake-but-valid-shaped credential for tests."""
+    return MeteocatConfig(meteocat_api_key="test-api-key")
+
+
+@pytest.fixture
+def make_meteocat_wrapper(meteocat_config):
+    """Factory for a MeteocatClientWrapper backed by an httpx.MockTransport."""
+
+    def _make(handler, config=None):
+        transport = httpx.MockTransport(handler)
+        return MeteocatClientWrapper(config or meteocat_config, transport=transport)
+
+    return _make
 
 
 @pytest.fixture
